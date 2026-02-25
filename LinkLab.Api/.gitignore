@@ -1,0 +1,17 @@
+# Build output
+**/bin/
+**/obj/
+
+# User/editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.log
+
+# Local secrets
+.env
+.env.local
+LinkLab.Api/appsettings.Development.json
+LinkLab.Api/appsettings.Production.json
