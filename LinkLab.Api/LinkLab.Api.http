@@ -1,0 +1,6 @@
+@LinkLab.Api_HostAddress = http://localhost:5125
+
+GET {{LinkLab.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
