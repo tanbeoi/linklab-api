@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
     public DbSet<CollabPost> CollabPosts => Set<CollabPost>();
+    public DbSet<Application> Applications => Set<Application>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +31,35 @@ public class AppDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
             e.HasIndex(p => p.CreatedAtUtc);
+        });
+
+        modelBuilder.Entity<Application>(entity =>
+        {
+            entity.HasKey(a => a.Id);
+
+            entity.Property(a => a.Message)
+                .HasMaxLength(2000);
+
+            entity.Property(a => a.Status)
+                .IsRequired();
+
+            entity.Property(a => a.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasOne(a => a.Post)
+                .WithMany(p => p.Applications)
+                .HasForeignKey(a => a.PostId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(a => a.ApplicantUser)
+                .WithMany()
+                .HasForeignKey(a => a.ApplicantUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(a => new { a.PostId, a.ApplicantUserId })
+                .IsUnique();
+
+            entity.HasIndex(a => a.CreatedAtUtc);
         });
     }
 

@@ -18,4 +18,7 @@ public class CollabPost
 
     // Timestamps
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    // Applications
+    public ICollection<Application> Applications { get; set; } = new List<Application>();
 }
