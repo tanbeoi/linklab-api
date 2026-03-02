@@ -46,9 +46,9 @@ public class AuthController : ControllerBase
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
 
-        // Optionally auto-login after register:
+        //Auto-login after register:
         var token = CreateJwt(user);
-
+        SetDevAuthCookie(token);
         return Ok(new
         {
             user = new { user.Id, user.Email, user.DisplayName },
@@ -68,6 +68,7 @@ public class AuthController : ControllerBase
         if (!ok) return Unauthorized(new { error = "Invalid credentials." });
 
         var token = CreateJwt(user);
+        SetDevAuthCookie(token);
 
         return Ok(new
         {
@@ -116,4 +117,20 @@ public class AuthController : ControllerBase
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    private void SetDevAuthCookie(string token)
+{
+    if (HttpContext.RequestServices
+        .GetRequiredService<IHostEnvironment>()
+        .IsDevelopment())
+    {
+        Response.Cookies.Append("access_token", token, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = false,               // set true only when HTTPS
+            SameSite = SameSiteMode.Lax,
+            Expires = DateTimeOffset.UtcNow.AddHours(12)
+        });
+    }
+}
 }

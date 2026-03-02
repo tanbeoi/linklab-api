@@ -36,6 +36,30 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+
+        // ✅ DEV ONLY: allow JWT from cookie so Swagger stays "logged in"
+        if (builder.Environment.IsDevelopment())
+        {
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    // Prefer normal Authorization header behavior if present
+                    var authHeader = context.Request.Headers.Authorization.ToString();
+                    if (!string.IsNullOrWhiteSpace(authHeader))
+                        return Task.CompletedTask;
+
+                    // Otherwise try cookie
+                    if (context.Request.Cookies.TryGetValue("access_token", out var token)
+                        && !string.IsNullOrWhiteSpace(token))
+                    {
+                        context.Token = token;
+                    }
+
+                    return Task.CompletedTask;
+                }
+            };
+        }
     });
 
 builder.Services.AddAuthorization();
