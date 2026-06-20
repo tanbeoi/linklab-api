@@ -1,3 +1,15 @@
+# macOS
+.DS_Store
+._*
+
+# .NET build output
+bin/
+obj/
+
+# Postman local/repo-linked files
+.postman/
+postman/
+
 # Build output
 **/bin/
 **/obj/
