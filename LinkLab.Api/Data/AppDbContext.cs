@@ -10,6 +10,8 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<CollabPost> CollabPosts => Set<CollabPost>();
     public DbSet<Application> Applications => Set<Application>();
+    public DbSet<Gallery> Galleries => Set<Gallery>();
+    public DbSet<Photo> Photos => Set<Photo>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -60,6 +62,58 @@ public class AppDbContext : DbContext
                 .IsUnique();
 
             entity.HasIndex(a => a.CreatedAtUtc);
+        });
+
+        modelBuilder.Entity<Gallery>(entity =>
+        {
+            entity.HasKey(g => g.Id);
+
+            entity.Property(g => g.Title)
+                .IsRequired();
+
+            entity.Property(g => g.Description)
+                .HasMaxLength(2000);
+
+            entity.Property(g => g.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasOne(g => g.Owner)
+                .WithMany()
+                .HasForeignKey(g => g.OwnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(g => g.CollabPost)
+                .WithMany()
+                .HasForeignKey(g => g.CollabPostId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(g => g.CreatedAtUtc);
+        });
+
+        modelBuilder.Entity<Photo>(entity =>
+        {
+            entity.HasKey(p => p.Id);
+
+            entity.Property(p => p.ImageUrl)
+                .IsRequired();
+
+            entity.Property(p => p.Caption)
+                .HasMaxLength(500);
+
+            entity.Property(p => p.SortOrder)
+                .IsRequired();
+
+            entity.Property(p => p.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasOne(p => p.Gallery)
+                .WithMany(g => g.Photos)
+                .HasForeignKey(p => p.GalleryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Each photos in a gallery must have an unique SortOrder
+            entity.HasIndex(p => new { p.GalleryId, p.SortOrder })
+                .IsUnique();
         });
     }
 
