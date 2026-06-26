@@ -74,6 +74,8 @@ public class AppDbContext : DbContext
             entity.Property(g => g.Description)
                 .HasMaxLength(2000);
 
+            entity.HasIndex(g => new { g.OwnerId, g.SortOrder });
+
             entity.Property(g => g.CreatedAtUtc)
                 .IsRequired();
 
@@ -86,8 +88,6 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(g => g.CollabPostId)
                 .OnDelete(DeleteBehavior.SetNull);
-
-            entity.HasIndex(g => g.CreatedAtUtc);
         });
 
         modelBuilder.Entity<Photo>(entity =>

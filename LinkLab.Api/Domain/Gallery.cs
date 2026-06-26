@@ -12,6 +12,7 @@ public class Gallery
     public Guid? CollabPostId { get; set; }
     public CollabPost? CollabPost { get; set; }
     public List<Photo> Photos { get; set; } = new();
+    public int SortOrder { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
 }
