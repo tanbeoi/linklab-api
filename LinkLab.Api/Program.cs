@@ -1,5 +1,11 @@
 using LinkLab.Api.Data;
+using LinkLab.Api.Options;
 using Microsoft.EntityFrameworkCore;
+
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
+using Microsoft.Extensions.Options;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -40,6 +46,24 @@ builder.Services.AddSwaggerGen(options =>
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+// Register an S3 client so controller can use AWS S3 
+builder.Services.Configure<S3Options>(
+    builder.Configuration.GetSection("AWS"));
+
+builder.Services.AddSingleton<IAmazonS3>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<S3Options>>().Value;
+
+    var credentials = new BasicAWSCredentials(
+        options.AccessKeyId,
+        options.SecretAccessKey
+    );
+
+    var region = RegionEndpoint.GetBySystemName(options.Region);
+
+    return new AmazonS3Client(credentials, region);
+});
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var jwtAudience = builder.Configuration["Jwt:Audience"];

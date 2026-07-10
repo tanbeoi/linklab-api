@@ -94,8 +94,12 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(p => p.Id);
 
-            entity.Property(p => p.ImageUrl)
-                .IsRequired();
+            entity.Property(p => p.ObjectKey)
+                .IsRequired()
+                .HasMaxLength(1000);
+
+            entity.HasIndex(p => p.ObjectKey)
+                .IsUnique();
 
             entity.Property(p => p.Caption)
                 .HasMaxLength(500);

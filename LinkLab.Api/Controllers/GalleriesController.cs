@@ -6,6 +6,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using Amazon.S3;
+using Amazon.S3.Model;
+using LinkLab.Api.Options;
+using Microsoft.Extensions.Options;
+
 namespace LinkLab.Api.Controllers;
 
 [ApiController]
@@ -13,10 +18,14 @@ namespace LinkLab.Api.Controllers;
 public class GalleriesController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IAmazonS3 _s3;
+    private readonly S3Options _s3Options;
 
-    public GalleriesController(AppDbContext db)
+    public GalleriesController(AppDbContext db, IAmazonS3 s3, IOptions<S3Options> s3Options)
     {
         _db = db;
+        _s3 = s3;
+        _s3Options = s3Options.Value;
     }
 
     // [x] Create gallery (auth required)
@@ -128,6 +137,52 @@ public class GalleriesController : ControllerBase
     [HttpGet("{galleryId:guid}/photos")]
     public async Task<IActionResult> ListPhotos(Guid galleryId)
     {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var galleryExists = await _db.Galleries
+            .AsNoTracking()
+            .AnyAsync(g => g.Id == galleryId && g.OwnerId == userId);
+
+        if (!galleryExists)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        var photos = await _db.Photos
+            .AsNoTracking()
+            .Where(p => p.GalleryId == galleryId)
+            .OrderBy(p => p.SortOrder)
+            .ThenBy(p => p.CreatedAtUtc)
+            .ToListAsync();
+
+        var res = photos.Select(p => new PhotoResponse
+        {
+            Id = p.Id,
+            GalleryId = p.GalleryId,
+            ObjectKey = p.ObjectKey,
+            ImageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = _s3Options.BucketName,
+                Key = p.ObjectKey,
+                Verb = HttpVerb.GET,
+                Expires = DateTime.UtcNow.AddMinutes(30)
+            }),
+            Caption = p.Caption,
+            SortOrder = p.SortOrder,
+            CreatedAtUtc = p.CreatedAtUtc
+        });
+
+        return Ok(res);
+    }
+
+    // [x] Create photo upload URL (auth required)
+    [Authorize]
+    [HttpPost("{galleryId:guid}/photos/upload-url")]
+    public async Task<IActionResult> CreatePhotoUploadUrl(
+        Guid galleryId,
+        CreatePhotoUploadUrlRequest req)
+    {
         // 1. Find current user from JWT
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
@@ -135,30 +190,134 @@ public class GalleriesController : ControllerBase
             return Unauthorized(new { error = "Invalid token user." });
 
         // 2. Check if the gallery exists and belongs to the current user
-        var gallery = await _db.Galleries
+        var galleryExists = await _db.Galleries
             .AsNoTracking()
             .AnyAsync(g => g.Id == galleryId && g.OwnerId == userId);
 
-        if (!gallery)
-            return NotFound(new { error = "Gallery not found or does not belong to the current user. " });
+        if (!galleryExists)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
 
-        // 3. Get photos for the gallery
-        var photos = await _db.Photos
+        // 3. Validate the image type
+        var contentType = (req.ContentType ?? string.Empty).Trim().ToLowerInvariant();
+
+        if (contentType is not ("image/jpeg" or "image/png" or "image/webp"))
+            return BadRequest(new { error = "Only jpeg, png, and webp images are allowed." });
+
+        var extension = contentType switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => ""
+        };
+
+        // 4. Generate a new photo ID and S3 object key
+        var photoId = Guid.NewGuid();
+
+        var objectKey =
+            $"users/{userId}/galleries/{galleryId}/photos/{photoId}{extension}";
+
+        // 5. Generate a pre-signed URL for uploading the photo to S3
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(10);
+
+        var urlRequest = new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.PUT,
+            Expires = expiresAtUtc,
+            ContentType = contentType 
+        };
+
+        var uploadUrl = _s3.GetPreSignedURL(urlRequest);
+
+        // 6. Return the upload URL and photo ID to the client
+        var res = new CreatePhotoUploadUrlResponse
+        {
+            PhotoId = photoId,
+            GalleryId = galleryId,
+            ObjectKey = objectKey,
+            UploadUrl = uploadUrl,
+            ExpiresAtUtc = expiresAtUtc
+        };
+
+        return Ok(res);
+    }
+
+    // [x] Add photo to gallery (auth required)
+    [Authorize]
+    [HttpPost("{galleryId:guid}/photos")]
+    public async Task<IActionResult> AddPhotoToGallery(
+        Guid galleryId,
+        AddPhotoToGalleryRequest req)
+    {
+        // 1. Find current user from JWT
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        // 2. Check if the gallery exists and belongs to the current user
+        var galleryExists = await _db.Galleries
             .AsNoTracking()
-            .Where(p => p.GalleryId == galleryId)
-            .OrderBy(p => p.SortOrder)
-            .ThenBy(p => p.CreatedAtUtc)
-            .Select(p => new PhotoResponse
-            {
-                Id = p.Id,
-                GalleryId = p.GalleryId,
-                ImageUrl = p.ImageUrl,
-                Caption = p.Caption,
-                SortOrder = p.SortOrder,
-                CreatedAtUtc = p.CreatedAtUtc
-            })
-            .ToListAsync();
+            .AnyAsync(g => g.Id == galleryId && g.OwnerId == userId);
 
-        return Ok(photos);
+        if (!galleryExists)
+            return NotFound(new { error = "Gallery not found." });
+
+
+        // 3. Validate the object key
+        var objectKey = req.ObjectKey.Trim();
+
+        if (string.IsNullOrWhiteSpace(objectKey))
+            return BadRequest(new { error = "Object key is required." });
+
+        // 3.5 Check if the object key exists in S3
+        var photoAlreadyExists = await _db.Photos
+            .AsNoTracking()
+            .AnyAsync(p => p.ObjectKey == objectKey);
+
+        if (photoAlreadyExists)
+            return Conflict(new { error = "This photo has already been added." });
+
+        // 4. Find the next sort order for the photo in the gallery
+        var nextSortOrder = await _db.Photos
+            .Where(p => p.GalleryId == galleryId)
+            .MaxAsync(p => (int?)p.SortOrder) ?? -1;
+
+        // 5. Create a new photo entity and save it to the database
+        var photo = new Photo
+        {
+            Id = req.PhotoId == Guid.Empty ? Guid.NewGuid() : req.PhotoId,
+            GalleryId = galleryId,
+            ObjectKey = objectKey,
+            Caption = string.IsNullOrWhiteSpace(req.Caption) ? null : req.Caption.Trim(),
+            SortOrder = nextSortOrder + 1,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        _db.Photos.Add(photo);
+        await _db.SaveChangesAsync();
+
+        var imageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = photo.ObjectKey,
+            Verb = HttpVerb.GET,
+            Expires = DateTime.UtcNow.AddMinutes(30)
+        });
+
+        var res = new PhotoResponse
+        {
+            Id = photo.Id,
+            GalleryId = photo.GalleryId,
+            ObjectKey = photo.ObjectKey,
+            ImageUrl = imageUrl,
+            Caption = photo.Caption,
+            SortOrder = photo.SortOrder,
+            CreatedAtUtc = photo.CreatedAtUtc
+        };
+
+        return Created($"/api/galleries/{galleryId}/photos/{photo.Id}", res);
     }
 }
