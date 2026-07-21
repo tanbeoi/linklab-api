@@ -320,4 +320,6 @@ public class GalleriesController : ControllerBase
 
         return Created($"/api/galleries/{galleryId}/photos/{photo.Id}", res);
     }
+
+    
 }
