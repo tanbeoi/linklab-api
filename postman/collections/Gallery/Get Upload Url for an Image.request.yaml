@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/galleries/019f83cd-8d84-74b0-bfc0-b15b22f83ef8/photos/upl\
+  oad-url"
+method: POST
+body:
+  type: json
+  content: |-
+    {
+      "fileName": "cowboyBebop.jpg",
+      "contentType": "image/jpeg",
+      "caption": "Cowboy Bebop screenshot"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{authToken}}"
+order: 4425183946957264

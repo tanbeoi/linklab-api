@@ -1,0 +1,17 @@
+$kind: http-request
+name: Save Image to Database
+url: "{{baseUrl}}/api/galleries/019f83cd-8d84-74b0-bfc0-b15b22f83ef8/photos"
+method: POST
+body:
+  type: json
+  content: |-
+    {
+      "photoId": "b044b322-e2e8-450d-9514-2310e4d95fd8",
+      "objectKey": "users/8bef05ae-9941-43c9-a930-5c985b4dabda/galleries/019f83cd-8d84-74b0-bfc0-b15b22f83ef8/photos/b044b322-e2e8-450d-9514-2310e4d95fd8.jpg",
+      "caption": "Cowboy Bebop screenshot"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{authToken}}"
+order: 4465432144396061

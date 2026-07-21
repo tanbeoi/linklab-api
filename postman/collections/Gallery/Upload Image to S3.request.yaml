@@ -1,0 +1,11 @@
+$kind: http-request
+name: Upload Image to S3
+url: ""
+method: PUT
+headers:
+  Content-Type: image/jpeg
+body:
+  type: file
+  content:
+    src: /Users/tanphamduy/Documents/Wallpaper/cowboyBebop.jpg
+order: 4438571740550404

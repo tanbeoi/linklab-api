@@ -1,0 +1,12 @@
+$kind: http-request
+name: See all images of a Gallery
+url: "{{baseUrl}}/api/galleries/019f83cd-8d84-74b0-bfc0-b15b22f83ef8/photos"
+method: GET
+body:
+  type: json
+  content: ""
+auth:
+  type: bearer
+  credentials:
+    token: "{{authToken}}"
+order: 4469527770302510

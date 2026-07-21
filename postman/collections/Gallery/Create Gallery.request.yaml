@@ -1,0 +1,16 @@
+$kind: http-request
+name: Create Gallery
+url: "{{baseUrl}}/api/galleries"
+method: POST
+body:
+  type: json
+  content: |-
+    {
+      "title": "Cowboy Bebop",
+      "description": "Cowboy Bebop Stills"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{authToken}}"
+order: 1784625723894

@@ -1,0 +1,6 @@
+name: LinkLab
+values:
+  - key: baseUrl
+    value: ''
+  - key: authToken
+    value: ''

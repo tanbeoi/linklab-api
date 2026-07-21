@@ -1,0 +1,12 @@
+$kind: http-request
+name: Get all Galleries of an User
+url: "{{baseUrl}}/api/galleries"
+method: GET
+body:
+  type: json
+  content: ""
+auth:
+  type: bearer
+  credentials:
+    token: "{{authToken}}"
+order: 1726408441354784
