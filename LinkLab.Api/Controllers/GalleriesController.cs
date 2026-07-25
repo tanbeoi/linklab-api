@@ -122,9 +122,11 @@ public class GalleriesController : ControllerBase
             Title = gallery.Title,
             Description = gallery.Description,
             OwnerId = gallery.OwnerId,
+            IsPublished = gallery.IsPublished,
             CollabPostId = gallery.CollabPostId,
             SortOrder = gallery.SortOrder,
             CreatedAtUtc = gallery.CreatedAtUtc,
+            PublishedAtUtc = gallery.PublishedAtUtc,
             PhotoCount = 0
         };
 
@@ -154,9 +156,11 @@ public class GalleriesController : ControllerBase
                 Title = g.Title,
                 Description = g.Description,
                 OwnerId = g.OwnerId,
+                IsPublished = g.IsPublished,
                 CollabPostId = g.CollabPostId,
                 SortOrder = g.SortOrder,
                 CreatedAtUtc = g.CreatedAtUtc,
+                PublishedAtUtc = g.PublishedAtUtc,
                 PhotoCount = g.Photos.Count
             })
             .ToListAsync();
@@ -297,13 +301,25 @@ public class GalleriesController : ControllerBase
             return NotFound(new { error = "Gallery not found." });
 
 
-        // 3. Validate the object key
+        // 3. Object key validation and checks
+        // Make sure objectKey is provided and belongs to this user's gallery
         var objectKey = req.ObjectKey.Trim();
 
         if (string.IsNullOrWhiteSpace(objectKey))
             return BadRequest(new { error = "Object key is required." });
 
-        // 3.5 Check if the object key exists in S3
+        var expectedPrefix =
+            $"users/{userId}/galleries/{galleryId}/photos/";
+
+        if (!objectKey.StartsWith(expectedPrefix, StringComparison.Ordinal))
+        {
+            return BadRequest(new
+            {
+                error = "Object key does not belong to this gallery."
+            });
+        }
+
+        // Check if the object key exists in SQL database (to prevent duplicates)
         var photoAlreadyExists = await _db.Photos
             .AsNoTracking()
             .AnyAsync(p => p.ObjectKey == objectKey);
@@ -311,7 +327,36 @@ public class GalleriesController : ControllerBase
         if (photoAlreadyExists)
             return Conflict(new { error = "This photo has already been added." });
 
-        // 4. Find the next sort order for the photo in the gallery
+        // Verify that the file was actually uploaded to S3
+        try
+        {
+            var metadata = await _s3.GetObjectMetadataAsync(
+                new GetObjectMetadataRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = objectKey
+                },
+                HttpContext.RequestAborted
+            );
+
+            if (metadata.ContentLength == 0)
+            {
+                return BadRequest(new
+                {
+                    error = "The uploaded image is empty."
+                });
+            }
+        }
+        catch (AmazonS3Exception ex)
+            when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return BadRequest(new
+            {
+                error = "The image has not been uploaded to S3."
+            });
+        }
+
+        // Find the next sort order for the photo in the gallery
         var nextSortOrder = await _db.Photos
             .Where(p => p.GalleryId == galleryId)
             .MaxAsync(p => (int?)p.SortOrder) ?? -1;
