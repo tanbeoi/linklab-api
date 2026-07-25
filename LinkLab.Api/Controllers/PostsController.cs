@@ -76,16 +76,43 @@ public class PostsController : ControllerBase
 
     // [x] List posts (public)
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int limit = 20)
+    public async Task<IActionResult> List(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
     {
-        if (limit < 1) limit = 1;
-        if (limit > 50) limit = 50;
+        // 1. Validate pagination values
+        if (page < 1)
+        {
+            return BadRequest(new
+            {
+                error = "Page must be at least 1."
+            });
+        }
 
-        var posts = await _db.CollabPosts
-            .AsNoTracking()
-            .Include(p => p.User)
+        if (pageSize < 1 || pageSize > 50)
+        {
+            return BadRequest(new
+            {
+                error = "Page size must be between 1 and 50."
+            });
+        }
+
+        // 2. Build the base query
+        var query = _db.CollabPosts
+            .AsNoTracking();
+
+        // 3. Count all matching posts
+        var totalCount = await query.CountAsync();
+
+        // 4. Calculate how many posts to skip
+        var skip = (page - 1) * pageSize;
+
+        // 5. Load only the requested page
+        var posts = await query
             .OrderByDescending(p => p.CreatedAtUtc)
-            .Take(limit)
+            .ThenByDescending(p => p.Id)
+            .Skip(skip)
+            .Take(pageSize)
             .Select(p => new CollabPostResponse(
                 p.Id,
                 p.Title,
@@ -98,7 +125,23 @@ public class PostsController : ControllerBase
             ))
             .ToListAsync();
 
-        return Ok(posts);
+        // 6. Calculate the total number of pages
+        // Use double for page size to keep decimal precision, then round up to the nearest whole number using Math.Ceiling.
+        var totalPages = (int)Math.Ceiling(
+            totalCount / (double)pageSize
+        );
+
+        // 7. Return posts and pagination information
+        return Ok(new
+        {
+            items = posts,
+            page,
+            pageSize,
+            totalCount,
+            totalPages,
+            hasPreviousPage = page > 1,
+            hasNextPage = page < totalPages
+        });
     }
 
     // [x] View post (public)
