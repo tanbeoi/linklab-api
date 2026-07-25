@@ -5,6 +5,7 @@ using LinkLab.Api.Dto;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -51,15 +52,45 @@ public class GalleriesController : ControllerBase
         if (desc.Length > 2000)
             return BadRequest(new { error = "Description must be 2000 characters or less." });
 
-        // If CollabPostId is provided, check if it exists
+        // If CollabPostId is provided, verify the user's connection to it
         if (req.CollabPostId.HasValue)
         {
-            var postExists = await _db.CollabPosts
-                .AsNoTracking()
-                .AnyAsync(p => p.Id == req.CollabPostId.Value);
+            var collabPostId = req.CollabPostId.Value;
 
-            if (!postExists)
-                return BadRequest(new { error = "CollabPostId does not exist." });
+            // 1. Find the collab post
+            var post = await _db.CollabPosts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == collabPostId);
+
+            if (post is null)
+            {
+                return BadRequest(new
+                {
+                    error = "Collab post does not exist."
+                });
+            }
+
+            // 2. Check whether the current user created the post
+            var isPostOwner = post.UserId == userId;
+
+            // 3. Check whether the current user was accepted onto the post
+            var isAcceptedCollaborator = await _db.Applications
+                .AsNoTracking()
+                .AnyAsync(a =>
+                    a.PostId == collabPostId &&
+                    a.ApplicantUserId == userId &&
+                    a.Status == ApplicationStatus.Accepted);
+
+            // 4. User must satisfy at least one condition
+            if (!isPostOwner && !isAcceptedCollaborator)
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new
+                    {
+                        error = "You were not involved in this collaboration."
+                    });
+            }
         }
 
         // Find the highest sortOrder this user alr has, if no galleries then use -1
