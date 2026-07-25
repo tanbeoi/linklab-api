@@ -5,6 +5,7 @@ public class Gallery
     public Guid Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public bool IsPublished { get; set; } = false;
     public Guid OwnerId { get; set;}
 
     // null! tells the compiler that this null value will be set later, so it doesn't throw a warning
@@ -14,5 +15,6 @@ public class Gallery
     public List<Photo> Photos { get; set; } = new();
     public int SortOrder { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? PublishedAtUtc { get; set; }
 
 }

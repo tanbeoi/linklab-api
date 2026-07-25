@@ -74,6 +74,10 @@ public class AppDbContext : DbContext
             entity.Property(g => g.Description)
                 .HasMaxLength(2000);
 
+            entity.Property(g => g.IsPublished)
+                .IsRequired()
+                .HasDefaultValue(false);
+
             entity.HasIndex(g => new { g.OwnerId, g.SortOrder });
 
             entity.Property(g => g.CreatedAtUtc)

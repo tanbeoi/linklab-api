@@ -171,18 +171,38 @@ public class GalleriesController : ControllerBase
     [Authorize]
     [HttpGet("{galleryId:guid}/photos")]
     public async Task<IActionResult> ListPhotos(Guid galleryId)
-    {
-        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        {
+        // The request may be authenticated or anonymous
+        var userIdText =
+            User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-            return Unauthorized(new { error = "Invalid token user." });
+        Guid? currentUserId = null;
 
-        var galleryExists = await _db.Galleries
+        if (Guid.TryParse(userIdText, out var parsedUserId))
+            currentUserId = parsedUserId;
+
+        // Find the gallery and read its visibility
+        var gallery = await _db.Galleries
             .AsNoTracking()
-            .AnyAsync(g => g.Id == galleryId && g.OwnerId == userId);
+            .Where(g => g.Id == galleryId)
+            .Select(g => new
+            {
+                g.Id,
+                g.OwnerId,
+                g.IsPublished
+            })
+            .FirstOrDefaultAsync();
 
-        if (!galleryExists)
-            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        var isOwner =
+            currentUserId.HasValue &&
+            gallery.OwnerId == currentUserId.Value;
+
+        // Private galleries are only visible to their owner
+        if (!gallery.IsPublished && !isOwner)
+            return NotFound(new { error = "Gallery not found." });
 
         var photos = await _db.Photos
             .AsNoTracking()
@@ -397,5 +417,84 @@ public class GalleriesController : ControllerBase
         return Created($"/api/galleries/{galleryId}/photos/{photo.Id}", res);
     }
 
-    
+    [Authorize]
+    [HttpPost("{galleryId:guid}/publish")]
+    public async Task<IActionResult> Publish(Guid galleryId)
+    {
+        // 1. Find current user from JWT
+        var userIdText =
+            User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized();
+
+        // 2. Find the gallery and ensure it belongs to the current user
+        var gallery = await _db.Galleries
+            .FirstOrDefaultAsync(g =>
+                g.Id == galleryId &&
+                g.OwnerId == userId);
+
+        if (gallery is null)
+        {
+            return NotFound(new
+            {
+                error = "Gallery not found."
+            });
+        }
+
+        // 3. Check if the gallery has any photos
+        var hasPhotos = await _db.Photos
+            .AnyAsync(p => p.GalleryId == galleryId);
+
+        if (!hasPhotos)
+        {
+            return BadRequest(new
+            {
+                error = "Add at least one photo before publishing."
+            });
+        }
+
+        // 4. Publish the gallery
+        gallery.IsPublished = true;
+        gallery.PublishedAtUtc = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            gallery.Id,
+            gallery.IsPublished,
+            gallery.PublishedAtUtc
+        });
+    }
+
+    [Authorize]
+    [HttpPost("{galleryId:guid}/unpublish")]
+    public async Task<IActionResult> Unpublish(Guid galleryId)
+    {
+        var userIdText =
+            User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized();
+
+        var gallery = await _db.Galleries
+            .FirstOrDefaultAsync(g =>
+                g.Id == galleryId &&
+                g.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        gallery.IsPublished = false;
+        gallery.PublishedAtUtc = null;
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            gallery.Id,
+            gallery.IsPublished
+        });
+    }
 }
