@@ -30,6 +30,7 @@ public class AppDbContext : DbContext
             e.HasOne(p => p.User)
             .WithMany()
             .HasForeignKey(p => p.UserId)
+            .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
 
             e.HasIndex(p => p.CreatedAtUtc);

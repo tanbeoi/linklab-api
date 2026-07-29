@@ -121,7 +121,7 @@ public class PostsController : ControllerBase
                 p.IsRemote,
                 p.CreatedAtUtc,
                 p.UserId,
-                p.User != null ? p.User.DisplayName : ""
+                p.User.DisplayName
             ))
             .ToListAsync();
 

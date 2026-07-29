@@ -137,7 +137,7 @@ public class GalleriesController : ControllerBase
     }
 
     [Authorize]
-    [HttpGet]
+    [HttpGet("mine")]
     public async Task<IActionResult> ListMine()
     {
         // Find current user from JWT
@@ -166,6 +166,79 @@ public class GalleriesController : ControllerBase
             .ToListAsync();
 
         return Ok(galleries);
+    }
+
+    // List all public galleries (public)
+    [HttpGet]
+    public async Task<ActionResult>List(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        // 1. Validate pagination values
+        if (page < 1)
+        {
+            return BadRequest(new
+            {
+                error = "Page must be at least 1."
+            });
+        }
+
+        if (pageSize < 1 || pageSize > 50)
+        {
+            return BadRequest(new
+            {
+                error = "Page size must be between 1 and 50."
+            });
+        }
+
+        // 2. Build the base query for all public galleries
+        var query = _db.Galleries
+            .AsNoTracking()
+            .Where(g => g.IsPublished);
+
+        // 3. Count all matching posts
+        var totalCount = await query.CountAsync();
+
+        // 4. Calculate how many posts to skip
+        var skip = (page - 1) * pageSize;
+
+        // 5. Load only the requested page
+        var galleries = await query
+            .OrderByDescending(g => g.PublishedAtUtc)
+            .ThenByDescending(g => g.Id)
+            .Skip(skip)
+            .Take(pageSize)
+            .Select(g => new GalleryResponse
+            {
+                Id = g.Id,
+                Title = g.Title,
+                Description = g.Description,
+                IsPublished = g.IsPublished,
+                OwnerId = g.OwnerId,
+                CollabPostId = g.CollabPostId,
+                SortOrder = g.SortOrder,
+                CreatedAtUtc = g.CreatedAtUtc,
+                PublishedAtUtc = g.PublishedAtUtc,
+                PhotoCount = g.Photos.Count
+            })
+            .ToListAsync();
+
+        // 6. Calculate total pages
+        var totalPages = (int)Math.Ceiling(
+            totalCount / (double)pageSize
+        );
+
+        // 7. Return galleries and pagination information
+        return Ok(new
+        {
+            items = galleries,
+            page,
+            pageSize,
+            totalCount,
+            totalPages,
+            hasPreviousPage = page > 1,
+            hasNextPage = page < totalPages
+        });
     }
 
     [Authorize]

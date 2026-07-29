@@ -6,7 +6,8 @@ public class CollabPost
 
     // Owner
     public Guid UserId { get; set; }
-    public User? User { get; set; }
+    // null! tells ef that this property starts as null but will be filled later
+    public User User { get; set; } = null!;
 
     // Content
     public string Title { get; set; } = string.Empty;
