@@ -3,9 +3,9 @@ name: Upload Image to S3
 url: ""
 method: PUT
 headers:
-  Content-Type: image/jpeg
+  Content-Type: image/png
 body:
   type: file
   content:
-    src: /Users/tanphamduy/Documents/Wallpaper/cowboyBebop.jpg
+    src: /Users/tanphamduy/Documents/Wallpaper/lookback1.png
 order: 4438571740550404
