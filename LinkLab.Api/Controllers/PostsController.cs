@@ -76,6 +76,10 @@ public class PostsController : ControllerBase
 
     // [x] List posts (public)
     [HttpGet]
+    [ProducesResponseType(
+        typeof(PagedResponse<CollabPostResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
@@ -132,15 +136,15 @@ public class PostsController : ControllerBase
         );
 
         // 7. Return posts and pagination information
-        return Ok(new
+        return Ok(new PagedResponse<CollabPostResponse>
         {
-            items = posts,
-            page,
-            pageSize,
-            totalCount,
-            totalPages,
-            hasPreviousPage = page > 1,
-            hasNextPage = page < totalPages
+            Items = posts,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages,
+            HasPreviousPage = page > 1,
+            HasNextPage = page < totalPages
         });
     }
 

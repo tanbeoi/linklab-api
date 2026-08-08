@@ -170,6 +170,10 @@ public class GalleriesController : ControllerBase
 
     // List all public galleries (public)
     [HttpGet]
+    [ProducesResponseType(
+        typeof(PagedResponse<GalleryResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult>List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
@@ -229,19 +233,19 @@ public class GalleriesController : ControllerBase
         );
 
         // 7. Return galleries and pagination information
-        return Ok(new
+        return Ok(new PagedResponse<GalleryResponse>
         {
-            items = galleries,
-            page,
-            pageSize,
-            totalCount,
-            totalPages,
-            hasPreviousPage = page > 1,
-            hasNextPage = page < totalPages
+            Items = galleries,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalPages,
+            HasPreviousPage = page > 1,
+            HasNextPage = page < totalPages
         });
     }
 
-    [Authorize]
+    [AllowAnonymous]
     [HttpGet("{galleryId:guid}/photos")]
     public async Task<IActionResult> ListPhotos(Guid galleryId)
         {
