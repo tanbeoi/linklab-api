@@ -82,11 +82,11 @@ public class AuthController : ControllerBase
     public IActionResult Me()
     {
         // Pulled from JWT claims
-        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var email = User.FindFirstValue(ClaimTypes.Email);
         var displayName = User.FindFirstValue("displayName");
 
-        return Ok(new { userId, email, displayName });
+        return Ok(new { id, email, displayName });
     }
 
     private string CreateJwt(User user)
