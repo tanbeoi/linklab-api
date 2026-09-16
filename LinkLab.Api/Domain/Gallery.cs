@@ -5,6 +5,7 @@ public class Gallery
     public Guid Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public GalleryPurpose Purpose { get; set; } = GalleryPurpose.Portfolio;
     public bool IsPublished { get; set; } = false;
     public Guid OwnerId { get; set;}
 

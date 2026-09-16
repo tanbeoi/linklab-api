@@ -1,10 +1,12 @@
 namespace LinkLab.Api.Dto;
+using LinkLab.Api.Domain;
 
 public class GalleryResponse
 {
     public Guid Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public GalleryPurpose Purpose { get; set; } = GalleryPurpose.Portfolio;
     public bool IsPublished { get; set; }
     public Guid OwnerId { get; set; }
     public Guid? CollabPostId { get; set; }

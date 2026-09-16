@@ -75,6 +75,10 @@ public class AppDbContext : DbContext
             entity.Property(g => g.Description)
                 .HasMaxLength(2000);
 
+            entity.Property(g => g.Purpose)
+                .IsRequired()
+                .HasDefaultValue(GalleryPurpose.Portfolio);
+
             entity.Property(g => g.IsPublished)
                 .IsRequired()
                 .HasDefaultValue(false);

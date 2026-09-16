@@ -22,6 +22,52 @@ public class GalleriesController : ControllerBase
     private readonly IAmazonS3 _s3;
     private readonly S3Options _s3Options;
 
+    // Helper method to validate if the user can link a gallery to a collaboration post
+    private async Task<IActionResult?> ValidateCollabPostLinkAsync(
+        Guid userId,
+        Guid collabPostId,
+        GalleryPurpose purpose)
+    {
+        var post = await _db.CollabPosts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == collabPostId);
+
+        if (post is null)
+            return BadRequest(new { error = "Collab post does not exist." });
+
+        var isPostOwner = post.UserId == userId;
+
+        if (purpose == GalleryPurpose.Moodboard)
+        {
+            if (!isPostOwner)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    error = "Only the post creator can link a moodboard."
+                });
+            }
+        }
+        else if (!isPostOwner)
+        {
+            var isAcceptedCollaborator = await _db.Applications
+                .AsNoTracking()
+                .AnyAsync(a =>
+                    a.PostId == collabPostId &&
+                    a.ApplicantUserId == userId &&
+                    a.Status == ApplicationStatus.Accepted);
+
+            if (!isAcceptedCollaborator)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    error = "Only the post creator or accepted collaborators can link a portfolio project."
+                });
+            }
+        }
+
+        return null; // No error: linking is allowed.
+    }
+
     public GalleriesController(AppDbContext db, IAmazonS3 s3, IOptions<S3Options> s3Options)
     {
         _db = db;
@@ -52,45 +98,24 @@ public class GalleriesController : ControllerBase
         if (desc.Length > 2000)
             return BadRequest(new { error = "Description must be 2000 characters or less." });
 
-        // If CollabPostId is provided, verify the user's connection to it
+        if (!Enum.IsDefined(req.Purpose))
+        {
+            return BadRequest(new
+            {
+                error = "Invalid gallery purpose."
+            });
+        }
+
+        // If CollabPostId is provided, verify the user's connection to it using the ValidateCollabPostLinkAsync helper
         if (req.CollabPostId.HasValue)
         {
-            var collabPostId = req.CollabPostId.Value;
+            var error = await ValidateCollabPostLinkAsync(
+                userId,
+                req.CollabPostId.Value,
+                req.Purpose);
 
-            // 1. Find the collab post
-            var post = await _db.CollabPosts
-                .AsNoTracking()
-                .FirstOrDefaultAsync(p => p.Id == collabPostId);
-
-            if (post is null)
-            {
-                return BadRequest(new
-                {
-                    error = "Collab post does not exist."
-                });
-            }
-
-            // 2. Check whether the current user created the post
-            var isPostOwner = post.UserId == userId;
-
-            // 3. Check whether the current user was accepted onto the post
-            var isAcceptedCollaborator = await _db.Applications
-                .AsNoTracking()
-                .AnyAsync(a =>
-                    a.PostId == collabPostId &&
-                    a.ApplicantUserId == userId &&
-                    a.Status == ApplicationStatus.Accepted);
-
-            // 4. User must satisfy at least one condition
-            if (!isPostOwner && !isAcceptedCollaborator)
-            {
-                return StatusCode(
-                    StatusCodes.Status403Forbidden,
-                    new
-                    {
-                        error = "You were not involved in this collaboration."
-                    });
-            }
+            if (error is not null)
+                return error;
         }
 
         // Find the highest sortOrder this user alr has, if no galleries then use -1
@@ -106,6 +131,7 @@ public class GalleriesController : ControllerBase
             OwnerId = userId,
             Title = title,
             Description = string.IsNullOrWhiteSpace(desc) ? null : desc,
+            Purpose = req.Purpose,
             CollabPostId = req.CollabPostId,
             SortOrder = nextSortOrder + 1,
             CreatedAtUtc = DateTime.UtcNow
@@ -121,6 +147,7 @@ public class GalleriesController : ControllerBase
             Id = gallery.Id,
             Title = gallery.Title,
             Description = gallery.Description,
+            Purpose = gallery.Purpose,
             OwnerId = gallery.OwnerId,
             IsPublished = gallery.IsPublished,
             CollabPostId = gallery.CollabPostId,
@@ -155,6 +182,7 @@ public class GalleriesController : ControllerBase
                 Id = g.Id,
                 Title = g.Title,
                 Description = g.Description,
+                Purpose = g.Purpose,
                 OwnerId = g.OwnerId,
                 IsPublished = g.IsPublished,
                 CollabPostId = g.CollabPostId,
@@ -217,6 +245,7 @@ public class GalleriesController : ControllerBase
                 Id = g.Id,
                 Title = g.Title,
                 Description = g.Description,
+                Purpose = g.Purpose,
                 IsPublished = g.IsPublished,
                 OwnerId = g.OwnerId,
                 CollabPostId = g.CollabPostId,
@@ -574,4 +603,48 @@ public class GalleriesController : ControllerBase
             gallery.IsPublished
         });
     }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/collab-post")]
+    public async Task<IActionResult> UpdateCollaboration(Guid galleryId, UpdateGalleryCollabPostRequest req)
+    {
+        // 1. Find current user from JWT
+        var userIdText =
+        User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized();
+
+        // 2. Find the gallery and ensure it belongs to the current user
+        var gallery = await _db.Galleries
+        .FirstOrDefaultAsync(g =>
+            g.Id == galleryId &&
+            g.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        // 3. If CollabPostId is provided, validate the user's connection to it
+        if (req.CollabPostId.HasValue)
+        {
+            var error = await ValidateCollabPostLinkAsync(
+                userId,
+                req.CollabPostId.Value,
+                gallery.Purpose);
+
+            if (error is not null)
+                return error;
+        }
+
+        // A null value unlinks the gallery.
+        gallery.CollabPostId = req.CollabPostId;
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            gallery.Id,
+            gallery.CollabPostId
+        });
+    }
+
 }
