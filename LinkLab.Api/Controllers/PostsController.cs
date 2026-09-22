@@ -185,8 +185,8 @@ public class PostsController : ControllerBase
 
         // 2) Basic validation
         var message = (req.Message ?? string.Empty).Trim();
-        if (message.Length == 0) return BadRequest("Message is required.");
-        if (message.Length > 2000) return BadRequest("Message must be <= 2000 characters.");
+        if (message.Length == 0) return BadRequest(new { error = "Message is required." });
+        if (message.Length > 2000) return BadRequest(new { error = "Message must be <= 2000 characters." });
 
         // 3) Ensure post exists
         var post = await _db.CollabPosts
@@ -196,7 +196,7 @@ public class PostsController : ControllerBase
         if (post is null) return NotFound();
 
         // Optional: prevent applying to own post
-        if (post.UserId == userId) return BadRequest("You cannot apply to your own post.");
+        if (post.UserId == userId) return BadRequest(new { error = "You cannot apply to your own post." });
 
         // 4) Prevent duplicates (1 application per user per post)
         var alreadyApplied = await _db.Applications
@@ -225,15 +225,15 @@ public class PostsController : ControllerBase
         // Don't have a GET /api/applications/{id} yet, just return the created object/ids
         return Created(
             $"/api/applications/{application.Id}",
-            new
+            new ApplicationResponse
             {
-                application.Id,
-                application.PostId,
-                application.ApplicantUserId,
-                application.Message,
+                Id = application.Id,
+                PostId = application.PostId,
+                ApplicantUserId = application.ApplicantUserId,
+                Message = application.Message,
                 Status = application.Status.ToString(),
-                application.CreatedAtUtc,
-                application.DecidedAtUtc
+                CreatedAtUtc = application.CreatedAtUtc,
+                DecidedAtUtc = application.DecidedAtUtc
             }
         );
     }
