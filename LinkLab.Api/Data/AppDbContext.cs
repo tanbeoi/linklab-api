@@ -5,6 +5,7 @@ namespace LinkLab.Api.Data;
 
 public class AppDbContext : DbContext
 {
+    public const string MoodboardPostIndexName = "IX_Galleries_OneMoodboardPerPost";
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) {}
 
     public DbSet<User> Users => Set<User>();
@@ -84,6 +85,12 @@ public class AppDbContext : DbContext
                 .HasDefaultValue(false);
 
             entity.HasIndex(g => new { g.OwnerId, g.SortOrder });
+
+            // Keep the general post index, plus uniqueness only for linked moodboards.
+            entity.HasIndex(g => g.CollabPostId);
+            entity.HasIndex(g => g.CollabPostId, MoodboardPostIndexName)
+                .IsUnique()
+                .HasFilter($"\"Purpose\" = {(int)GalleryPurpose.Moodboard} AND \"CollabPostId\" IS NOT NULL");
 
             entity.Property(g => g.CreatedAtUtc)
                 .IsRequired();

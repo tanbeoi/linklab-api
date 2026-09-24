@@ -11,6 +11,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using LinkLab.Api.Options;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace LinkLab.Api.Controllers;
 
@@ -26,7 +27,8 @@ public class GalleriesController : ControllerBase
     private async Task<IActionResult?> ValidateCollabPostLinkAsync(
         Guid userId,
         Guid collabPostId,
-        GalleryPurpose purpose)
+        GalleryPurpose purpose,
+        Guid? currentGalleryId = null)
     {
         var post = await _db.CollabPosts
             .AsNoTracking()
@@ -46,6 +48,18 @@ public class GalleriesController : ControllerBase
                     error = "Only the post creator can link a moodboard."
                 });
             }
+
+            var alreadyLinked = await _db.Galleries
+                .AsNoTracking()
+                .AnyAsync(g => g.CollabPostId == collabPostId &&
+                    g.Purpose == GalleryPurpose.Moodboard &&
+                    // 1. Creating: currentGalleryId is null, so check all moodboards.
+                    // 2. Updating: exclude the current gallery and check whether
+                    //    another moodboard is already linked to the target post.
+                    (!currentGalleryId.HasValue || g.Id != currentGalleryId.Value));
+
+            if (alreadyLinked)
+                return Conflict(new { error = "This post already has a linked moodboard. Unlink it before linking another." });
         }
         else if (!isPostOwner)
         {
@@ -66,6 +80,24 @@ public class GalleriesController : ControllerBase
         }
 
         return null; // No error: linking is allowed.
+    }
+
+    private async Task<IActionResult?> SaveGalleryChangesAsync()
+    {
+        try
+        {
+            await _db.SaveChangesAsync();
+            return null;
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: AppDbContext.MoodboardPostIndexName
+            })
+        {
+            return Conflict(new { error = "This post already has a linked moodboard. Unlink it before linking another." });
+        }
     }
 
     public GalleriesController(AppDbContext db, IAmazonS3 s3, IOptions<S3Options> s3Options)
@@ -139,7 +171,9 @@ public class GalleriesController : ControllerBase
 
         // 2. Save gallery to database
         _db.Galleries.Add(gallery);
-        await _db.SaveChangesAsync();
+        var saveError = await SaveGalleryChangesAsync();
+        if (saveError is not null)
+            return saveError;
 
         // 3. Build response
         var res = new GalleryResponse
@@ -604,6 +638,7 @@ public class GalleriesController : ControllerBase
         });
     }
 
+ // [x] Link a gallery to a collaboration post (auth required)
     [Authorize]
     [HttpPatch("{galleryId:guid}/collab-post")]
     public async Task<IActionResult> UpdateCollaboration(Guid galleryId, UpdateGalleryCollabPostRequest req)
@@ -630,7 +665,8 @@ public class GalleriesController : ControllerBase
             var error = await ValidateCollabPostLinkAsync(
                 userId,
                 req.CollabPostId.Value,
-                gallery.Purpose);
+                gallery.Purpose,
+                gallery.Id);
 
             if (error is not null)
                 return error;
@@ -638,7 +674,9 @@ public class GalleriesController : ControllerBase
 
         // A null value unlinks the gallery.
         gallery.CollabPostId = req.CollabPostId;
-        await _db.SaveChangesAsync();
+        var saveError = await SaveGalleryChangesAsync();
+        if (saveError is not null)
+            return saveError;
 
         return Ok(new
         {
