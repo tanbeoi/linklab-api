@@ -439,7 +439,7 @@ public class GalleriesController : ControllerBase
         return Ok(res);
     }
 
-    // [x] Add photo to gallery (auth required)
+    // [x] Add photo to database (auth required)
     [Authorize]
     [HttpPost("{galleryId:guid}/photos")]
     public async Task<IActionResult> AddPhotoToGallery(

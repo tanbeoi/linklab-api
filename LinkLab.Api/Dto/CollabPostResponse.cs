@@ -8,5 +8,9 @@ public record CollabPostResponse(
     bool IsRemote,
     DateTime CreatedAtUtc,
     Guid UserId,
-    string OwnerDisplayName
+    string OwnerDisplayName,
+
+    // Moodboard data for frontend display
+    IReadOnlyList<string> MoodboardPreviewImageUrls,
+    int MoodboardPhotoCount
 );

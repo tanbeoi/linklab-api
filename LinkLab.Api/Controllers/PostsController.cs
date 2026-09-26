@@ -6,17 +6,89 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
+using Amazon.S3;
+using Amazon.S3.Model;
+using LinkLab.Api.Options;
+using Microsoft.Extensions.Options;
+
 namespace LinkLab.Api.Controllers;
 
 [ApiController]
 [Route("api/posts")]
 public class PostsController : ControllerBase
 {
-    private readonly AppDbContext _db;
+private readonly AppDbContext _db;
+private readonly IAmazonS3 _s3;
+private readonly S3Options _s3Options;
 
-    public PostsController(AppDbContext db)
+public PostsController(
+    AppDbContext db,
+    IAmazonS3 s3,
+    IOptions<S3Options> s3Options)
+{
+    _db = db;
+    _s3 = s3;
+    _s3Options = s3Options.Value;
+}
+
+    private async Task<List<CollabPostResponse>> AddMoodboardPreviewsAsync(
+        IReadOnlyList<CollabPostResponse> posts)
     {
-        _db = db;
+        if (posts.Count == 0)
+            return new List<CollabPostResponse>();
+
+        var postIds = posts.Select(p => p.Id).ToList();
+
+        // Fetch previews for all returned posts together
+        // This avoids N+1 queries and reduces the number of S3 requests.
+        // 
+        var moodboards = await _db.Galleries
+            .AsNoTracking()
+            .Where(g =>
+                g.CollabPostId.HasValue &&
+                postIds.Contains(g.CollabPostId.Value) &&
+                g.Purpose == GalleryPurpose.Moodboard &&
+                g.IsPublished)
+            .Select(g => new
+            {
+                PostId = g.CollabPostId!.Value,
+                PhotoCount = g.Photos.Count,
+                ObjectKeys = g.Photos
+                    .OrderBy(p => p.SortOrder)
+                    .ThenBy(p => p.Id)
+                    .Take(3)
+                    .Select(p => p.ObjectKey)
+                    .ToList()
+            })
+            .ToListAsync();
+
+        var moodboardsByPostId = moodboards.ToDictionary(m => m.PostId);
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(30);
+
+        return posts.Select(post =>
+        {
+            // If no moodboard exists for this post, return the post as-is.
+            if (!moodboardsByPostId.TryGetValue(post.Id, out var moodboard))
+                return post;
+
+            // Generate URLs after the database query has completed.
+            var imageUrls = moodboard.ObjectKeys
+                .Select(key => _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = key,
+                    Verb = HttpVerb.GET,
+                    Expires = expiresAtUtc
+                }))
+                .ToList();
+            
+            // return a new CollabPostResponse with the moodboard data included
+            return post with
+            {
+                MoodboardPreviewImageUrls = imageUrls,
+                MoodboardPhotoCount = moodboard.PhotoCount
+            };
+        }).ToList();
     }
 
     // [x] Create post (auth required)
@@ -68,7 +140,9 @@ public class PostsController : ControllerBase
             post.IsRemote,
             post.CreatedAtUtc,
             post.UserId,
-            user.DisplayName
+            user.DisplayName,
+            Array.Empty<string>(),
+            0
         );
 
         return CreatedAtAction(nameof(GetById), new { id = post.Id }, res);
@@ -125,9 +199,13 @@ public class PostsController : ControllerBase
                 p.IsRemote,
                 p.CreatedAtUtc,
                 p.UserId,
-                p.User.DisplayName
+                p.User.DisplayName,
+                Array.Empty<string>(), // MoodboardPreviewImageUrls
+                0                     // MoodboardPhotoCount
             ))
             .ToListAsync();
+
+        posts = await AddMoodboardPreviewsAsync(posts);
 
         // 6. Calculate the total number of pages
         // Use double for page size to keep decimal precision, then round up to the nearest whole number using Math.Ceiling.
@@ -164,13 +242,20 @@ public class PostsController : ControllerBase
                 p.IsRemote,
                 p.CreatedAtUtc,
                 p.UserId,
-                p.User != null ? p.User.DisplayName : ""
+                p.User != null ? p.User.DisplayName : "",
+                Array.Empty<string>(), // MoodboardPreviewImageUrls
+                0                     // MoodboardPhotoCount
             ))
             .FirstOrDefaultAsync();
 
+        
+
         if (post is null) return NotFound(new { error = "Post not found." });
 
-        return Ok(post);
+        // since post is a single item, we can create a single-item array and return the first item of the result.
+        var enrichedPosts = await AddMoodboardPreviewsAsync(new[] { post });
+
+        return Ok(enrichedPosts[0]);
     }
 
     // [x] Apply to post (auth required)

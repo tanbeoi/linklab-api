@@ -1,9 +1,15 @@
 $kind: http-request
-name: Upload Image to S3
-url: ""
+url: https://linklab-uploads.s3.ap-southeast-2.amazonaws.com/users/d9de7160-4b49-4342-b927-b04487807e21/galleries/01a0ac5b-6beb-7eb9-a7ac-517e092f55a3/photos/3a110a1f-1487-452c-9973-ffc71f58aa87.png?X-Amz-Expires=600&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAZBWGBK4EZHNGVOTC%2F20260922%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20260922T034440Z&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Signature=25003488a8a5810373ba0b80e84ff8f6aeff7ca9fe8f84fd3163a0d4f7c92a03
 method: PUT
 headers:
   Content-Type: image/png
+queryParams:
+  X-Amz-Expires: "600"
+  X-Amz-Algorithm: AWS4-HMAC-SHA256
+  X-Amz-Credential: AKIAZBWGBK4EZHNGVOTC%2F20260922%2Fap-southeast-2%2Fs3%2Faws4_request
+  X-Amz-Date: 20260922T034440Z
+  X-Amz-SignedHeaders: content-type%3Bhost
+  X-Amz-Signature: 25003488a8a5810373ba0b80e84ff8f6aeff7ca9fe8f84fd3163a0d4f7c92a03
 body:
   type: file
   content:

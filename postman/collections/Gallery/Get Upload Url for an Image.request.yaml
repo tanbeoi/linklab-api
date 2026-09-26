@@ -1,6 +1,5 @@
 $kind: http-request
-name: Get Upload Url for an Image
-url: "{{baseUrl}}/api/galleries/019f033a-b822-7ca8-8905-d3636bac59a3/photos/upload-url"
+url: "{{baseUrl}}/api/galleries/01a0ac5b-6beb-7eb9-a7ac-517e092f55a3/photos/upload-url"
 method: POST
 body:
   type: json
