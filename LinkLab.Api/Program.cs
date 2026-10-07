@@ -8,6 +8,7 @@ using Amazon.S3;
 using Microsoft.Extensions.Options;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
@@ -18,7 +19,20 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var message = context.ModelState.Values
+                .SelectMany(value => value.Errors)
+                .Select(error => error.ErrorMessage)
+                .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message))
+                ?? "The request is invalid.";
+
+            return new BadRequestObjectResult(new { error = message });
+        };
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -92,27 +106,45 @@ builder.Services
             ClockSkew = TimeSpan.FromMinutes(2)
         };
 
-        // ✅ DEV ONLY: allow JWT from cookie so Swagger stays "logged in"
+        options.Events = new JwtBearerEvents
+        {
+            OnChallenge = async context =>
+            {
+                context.HandleResponse();
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "Authentication is required."
+                });
+            },
+            OnForbidden = async context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "You are not allowed to perform this action."
+                });
+            }
+        };
+
+        // DEV ONLY: allow JWT from cookie so Swagger stays "logged in".
         if (builder.Environment.IsDevelopment())
         {
-            options.Events = new JwtBearerEvents
+            options.Events.OnMessageReceived = context =>
             {
-                OnMessageReceived = context =>
-                {
-                    // Prefer normal Authorization header behavior if present
-                    var authHeader = context.Request.Headers.Authorization.ToString();
-                    if (!string.IsNullOrWhiteSpace(authHeader))
-                        return Task.CompletedTask;
-
-                    // Otherwise try cookie
-                    if (context.Request.Cookies.TryGetValue("access_token", out var token)
-                        && !string.IsNullOrWhiteSpace(token))
-                    {
-                        context.Token = token;
-                    }
-
+                // Prefer normal Authorization header behavior if present.
+                var authHeader = context.Request.Headers.Authorization.ToString();
+                if (!string.IsNullOrWhiteSpace(authHeader))
                     return Task.CompletedTask;
+
+                // Otherwise try cookie.
+                if (context.Request.Cookies.TryGetValue("access_token", out var token)
+                    && !string.IsNullOrWhiteSpace(token))
+                {
+                    context.Token = token;
                 }
+
+                return Task.CompletedTask;
             };
         }
     });

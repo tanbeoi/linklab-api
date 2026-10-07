@@ -566,7 +566,7 @@ public class GalleriesController : ControllerBase
             User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (!Guid.TryParse(userIdText, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         // 2. Find the gallery and ensure it belongs to the current user
         var gallery = await _db.Galleries
@@ -616,7 +616,7 @@ public class GalleriesController : ControllerBase
             User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (!Guid.TryParse(userIdText, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         var gallery = await _db.Galleries
             .FirstOrDefaultAsync(g =>
@@ -648,7 +648,7 @@ public class GalleriesController : ControllerBase
         User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         if (!Guid.TryParse(userIdText, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         // 2. Find the gallery and ensure it belongs to the current user
         var gallery = await _db.Galleries

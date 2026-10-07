@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Mvc;
 
 namespace LinkLab.Api.ErrorHandling;
 
@@ -20,15 +19,8 @@ public class GlobalExceptionHandler(
         context.Response.StatusCode =
             StatusCodes.Status500InternalServerError;
 
-        var problem = new ProblemDetails
-        {
-            Status = StatusCodes.Status500InternalServerError,
-            Title = "An unexpected error occurred.",
-            Detail = "Please try again later."
-        };
-
         await context.Response.WriteAsJsonAsync(
-            problem,
+            new { error = "An unexpected error occurred. Please try again later." },
             cancellationToken);
 
         return true;

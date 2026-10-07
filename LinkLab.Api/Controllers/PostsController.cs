@@ -266,7 +266,7 @@ public PostsController(
         // 1) Get userId from JWT
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         // 2) Basic validation
         var message = (req.Message ?? string.Empty).Trim();
@@ -278,7 +278,7 @@ public PostsController(
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == postId);
 
-        if (post is null) return NotFound();
+        if (post is null) return NotFound(new { error = "Post not found." });
 
         // Optional: prevent applying to own post
         if (post.UserId == userId) return BadRequest(new { error = "You cannot apply to your own post." });
@@ -288,7 +288,8 @@ public PostsController(
             .AsNoTracking()
             .AnyAsync(a => a.PostId == postId && a.ApplicantUserId == userId);
 
-        if (alreadyApplied) return Conflict("You already applied to this post.");
+        if (alreadyApplied)
+            return Conflict(new { error = "You already applied to this post." });
 
         // 5) Create application
         var application = new Application
@@ -330,17 +331,21 @@ public PostsController(
         // 1) current user id from JWT
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         // 2) load post (need owner check)
         var post = await _db.CollabPosts
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == postId);
 
-        if (post is null) return NotFound();
+        if (post is null) return NotFound(new { error = "Post not found." });
 
         // 3) owner-only authorization
-        if (post.UserId != userId) return Forbid(); // 403
+        if (post.UserId != userId)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = "You are not allowed to view applications for this post."
+            });
 
         // 4) query applications + applicant user info
         var apps = await _db.Applications

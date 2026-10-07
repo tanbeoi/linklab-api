@@ -34,17 +34,22 @@ public class ApplicationsController : ControllerBase
         // 1) current user id
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid token user." });
 
         // 2) load application + its post (need owner check)
         var app = await _db.Applications
             .Include(a => a.Post)
             .FirstOrDefaultAsync(a => a.Id == applicationId);
 
-        if (app is null) return NotFound();
+        if (app is null)
+            return NotFound(new { error = "Application not found." });
 
         // 3) owner-only authorization
-        if (app.Post.UserId != userId) return Forbid(); // 403
+        if (app.Post.UserId != userId)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = "You are not allowed to decide this application."
+            });
 
         // 4) only pending can be decided
         if (app.Status != ApplicationStatus.Pending)
