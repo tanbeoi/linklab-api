@@ -10,6 +10,7 @@ public class GalleryResponse
     public bool IsPublished { get; set; }
     public Guid OwnerId { get; set; }
     public Guid? CollabPostId { get; set; }
+    public string? CollabPostTitle { get; set; }
     public int SortOrder { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? PublishedAtUtc { get; set; }
