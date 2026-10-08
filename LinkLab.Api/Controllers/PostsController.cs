@@ -31,6 +31,15 @@ public PostsController(
     _s3Options = s3Options.Value;
 }
 
+    private Guid? GetCurrentUserId()
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        return Guid.TryParse(userIdText, out var userId)
+            ? userId
+            : null;
+    }
+
     private async Task<List<CollabPostResponse>> AddMoodboardPreviewsAsync(
         IReadOnlyList<CollabPostResponse> posts)
     {
@@ -142,7 +151,8 @@ public PostsController(
             post.UserId,
             user.DisplayName,
             Array.Empty<string>(),
-            0
+            0,
+            false
         );
 
         return CreatedAtAction(nameof(GetById), new { id = post.Id }, res);
@@ -175,6 +185,8 @@ public PostsController(
             });
         }
 
+        var currentUserId = GetCurrentUserId();
+
         // 2. Build the base query
         var query = _db.CollabPosts
             .AsNoTracking();
@@ -201,7 +213,10 @@ public PostsController(
                 p.UserId,
                 p.User.DisplayName,
                 Array.Empty<string>(), // MoodboardPreviewImageUrls
-                0                     // MoodboardPhotoCount
+                0,                    // MoodboardPhotoCount
+                currentUserId.HasValue && _db.Applications.Any(a =>
+                    a.PostId == p.Id &&
+                    a.ApplicantUserId == currentUserId.Value)
             ))
             .ToListAsync();
 
@@ -230,6 +245,8 @@ public PostsController(
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
+        var currentUserId = GetCurrentUserId();
+
         var post = await _db.CollabPosts
             .AsNoTracking()
             .Include(p => p.User)
@@ -244,7 +261,10 @@ public PostsController(
                 p.UserId,
                 p.User != null ? p.User.DisplayName : "",
                 Array.Empty<string>(), // MoodboardPreviewImageUrls
-                0                     // MoodboardPhotoCount
+                0,                    // MoodboardPhotoCount
+                currentUserId.HasValue && _db.Applications.Any(a =>
+                    a.PostId == p.Id &&
+                    a.ApplicantUserId == currentUserId.Value)
             ))
             .FirstOrDefaultAsync();
 

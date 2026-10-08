@@ -12,5 +12,8 @@ public record CollabPostResponse(
 
     // Moodboard data for frontend display
     IReadOnlyList<string> MoodboardPreviewImageUrls,
-    int MoodboardPhotoCount
+    int MoodboardPhotoCount,
+
+    // True only when the authenticated viewer has already applied.
+    bool HasCurrentUserApplied
 );
