@@ -100,6 +100,51 @@ public class GalleriesController : ControllerBase
         _s3Options = s3Options.Value;
     }
 
+    private async Task AddPreviewImagesAsync(IReadOnlyList<GalleryResponse> galleries)
+    {
+        if (galleries.Count == 0)
+            return;
+
+        var galleryIds = galleries.Select(gallery => gallery.Id).ToList();
+
+        // Fetch the first image for every displayed gallery in one database query.
+        // This avoids one photo request per gallery on the public gallery page.
+        var firstPhotos = await _db.Galleries
+            .AsNoTracking()
+            .Where(gallery => galleryIds.Contains(gallery.Id))
+            .Select(gallery => new
+            {
+                gallery.Id,
+                ObjectKey = gallery.Photos
+                    .OrderBy(photo => photo.SortOrder)
+                    .ThenBy(photo => photo.CreatedAtUtc)
+                    .ThenBy(photo => photo.Id)
+                    .Select(photo => photo.ObjectKey)
+                    .FirstOrDefault()
+            })
+            .ToListAsync();
+
+        var objectKeysByGalleryId = firstPhotos
+            .Where(photo => !string.IsNullOrWhiteSpace(photo.ObjectKey))
+            .ToDictionary(photo => photo.Id, photo => photo.ObjectKey);
+
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(30);
+
+        foreach (var gallery in galleries)
+        {
+            if (!objectKeysByGalleryId.TryGetValue(gallery.Id, out var objectKey))
+                continue;
+
+            gallery.PreviewImageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = _s3Options.BucketName,
+                Key = objectKey,
+                Verb = HttpVerb.GET,
+                Expires = expiresAtUtc
+            });
+        }
+    }
+
     // [x] Create gallery (auth required)
     [Authorize]
     [HttpPost]
@@ -216,9 +261,12 @@ public class GalleriesController : ControllerBase
                 SortOrder = g.SortOrder,
                 CreatedAtUtc = g.CreatedAtUtc,
                 PublishedAtUtc = g.PublishedAtUtc,
-                PhotoCount = g.Photos.Count
+                PhotoCount = g.Photos.Count,
+                OwnerDisplayName = g.Owner.DisplayName
             })
             .ToListAsync();
+
+        await AddPreviewImagesAsync(galleries);
 
         return Ok(galleries);
     }
@@ -279,9 +327,12 @@ public class GalleriesController : ControllerBase
                 SortOrder = g.SortOrder,
                 CreatedAtUtc = g.CreatedAtUtc,
                 PublishedAtUtc = g.PublishedAtUtc,
-                PhotoCount = g.Photos.Count
+                PhotoCount = g.Photos.Count,
+                OwnerDisplayName = g.Owner.DisplayName
             })
             .ToListAsync();
+
+        await AddPreviewImagesAsync(galleries);
 
         // 6. Calculate total pages
         var totalPages = (int)Math.Ceiling(

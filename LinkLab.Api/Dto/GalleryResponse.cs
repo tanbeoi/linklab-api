@@ -14,4 +14,6 @@ public class GalleryResponse
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? PublishedAtUtc { get; set; }
     public int PhotoCount { get; set; }
+    public string OwnerDisplayName { get; set; } = string.Empty;
+    public string? PreviewImageUrl { get; set; }
 }
