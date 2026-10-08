@@ -74,7 +74,7 @@ public sealed class MoodboardLinkTests : IDisposable
     }
 
     [Fact]
-    public async Task AcceptedCollaborator_CannotCreateOrLinkMoodboard_OrModifyOwnersGallery()
+    public async Task AcceptedCollaborator_CanCreateOrLinkMoodboard_ButCannotDuplicateOrModifyOwnersGallery()
     {
         var collaborator = new User { Email = "collaborator@test.com", PasswordHash = "unused" };
         _db.Applications.Add(new Application
@@ -83,16 +83,51 @@ public sealed class MoodboardLinkTests : IDisposable
         });
         await _db.SaveChangesAsync();
         var controller = Controller(collaborator.Id);
-        Assert.Equal(403, Assert.IsType<ObjectResult>(
-            await controller.Create(Request(GalleryPurpose.Moodboard, _post.Id))).StatusCode);
+        var created = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(GalleryPurpose.Moodboard, _post.Id))).Value);
+        Assert.Equal(collaborator.Id, created.OwnerId);
+        Assert.IsType<ConflictObjectResult>(await Controller(_owner.Id).Create(
+            Request(GalleryPurpose.Moodboard, _post.Id)));
+        var standalone = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(GalleryPurpose.Moodboard, null))).Value);
+        Assert.IsType<ConflictObjectResult>(await controller.UpdateCollaboration(
+            standalone.Id, new() { CollabPostId = _post.Id }));
+        Assert.IsType<OkObjectResult>(await controller.UpdateCollaboration(created.Id, new()));
+        Assert.IsType<OkObjectResult>(await controller.UpdateCollaboration(
+            standalone.Id, new() { CollabPostId = _post.Id }));
+        Assert.IsType<OkObjectResult>(await controller.UpdateCollaboration(
+            standalone.Id, new() { CollabPostId = _post.Id }));
+        Assert.IsType<CreatedResult>(await controller.Create(Request(GalleryPurpose.Portfolio, _post.Id)));
+        Assert.IsType<OkObjectResult>(await controller.UpdateCollaboration(standalone.Id, new()));
+        var owned = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await Controller(_owner.Id).Create(Request(GalleryPurpose.Moodboard, _post.Id))).Value);
+        Assert.IsType<NotFoundObjectResult>(await controller.UpdateCollaboration(owned.Id, new()));
+        Assert.IsType<ConflictObjectResult>(await controller.Create(Request(GalleryPurpose.Moodboard, _post.Id)));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(ApplicationStatus.Pending)]
+    [InlineData(ApplicationStatus.Rejected)]
+    public async Task NonCollaborator_CannotCreateOrLinkMoodboard(ApplicationStatus? status)
+    {
+        var user = new User { Email = "other@test.com", PasswordHash = "unused" };
+        _db.Users.Add(user);
+        if (status.HasValue)
+            _db.Applications.Add(new Application
+            {
+                PostId = _post.Id, ApplicantUser = user, Status = status.Value
+            });
+        await _db.SaveChangesAsync();
+        var controller = Controller(user.Id);
+
+        Assert.Equal(403, Assert.IsType<ObjectResult>(await controller.Create(
+            Request(GalleryPurpose.Moodboard, _post.Id))).StatusCode);
         var standalone = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
             await controller.Create(Request(GalleryPurpose.Moodboard, null))).Value);
         Assert.Equal(403, Assert.IsType<ObjectResult>(await controller.UpdateCollaboration(
             standalone.Id, new() { CollabPostId = _post.Id })).StatusCode);
-        Assert.IsType<CreatedResult>(await controller.Create(Request(GalleryPurpose.Portfolio, _post.Id)));
-        var owned = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
-            await Controller(_owner.Id).Create(Request(GalleryPurpose.Moodboard, _post.Id))).Value);
-        Assert.IsType<NotFoundObjectResult>(await controller.UpdateCollaboration(owned.Id, new()));
+        Assert.Null((await _db.Galleries.FindAsync(standalone.Id))!.CollabPostId);
     }
 
     [Fact]

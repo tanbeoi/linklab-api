@@ -39,29 +39,7 @@ public class GalleriesController : ControllerBase
 
         var isPostOwner = post.UserId == userId;
 
-        if (purpose == GalleryPurpose.Moodboard)
-        {
-            if (!isPostOwner)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, new
-                {
-                    error = "Only the post creator can link a moodboard."
-                });
-            }
-
-            var alreadyLinked = await _db.Galleries
-                .AsNoTracking()
-                .AnyAsync(g => g.CollabPostId == collabPostId &&
-                    g.Purpose == GalleryPurpose.Moodboard &&
-                    // 1. Creating: currentGalleryId is null, so check all moodboards.
-                    // 2. Updating: exclude the current gallery and check whether
-                    //    another moodboard is already linked to the target post.
-                    (!currentGalleryId.HasValue || g.Id != currentGalleryId.Value));
-
-            if (alreadyLinked)
-                return Conflict(new { error = "This post already has a linked moodboard. Unlink it before linking another." });
-        }
-        else if (!isPostOwner)
+        if (!isPostOwner)
         {
             var isAcceptedCollaborator = await _db.Applications
                 .AsNoTracking()
@@ -74,9 +52,24 @@ public class GalleriesController : ControllerBase
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new
                 {
-                    error = "Only the post creator or accepted collaborators can link a portfolio project."
+                    error = "Only the post creator or accepted collaborators can link a gallery to this post."
                 });
             }
+        }
+
+        if (purpose == GalleryPurpose.Moodboard)
+        {
+            var alreadyLinked = await _db.Galleries
+                .AsNoTracking()
+                .AnyAsync(g => g.CollabPostId == collabPostId &&
+                    g.Purpose == GalleryPurpose.Moodboard &&
+                    // 1. Creating: currentGalleryId is null, so check all moodboards.
+                    // 2. Updating: exclude the current gallery and check whether
+                    //    another moodboard is already linked to the target post.
+                    (!currentGalleryId.HasValue || g.Id != currentGalleryId.Value));
+
+            if (alreadyLinked)
+                return Conflict(new { error = "This post already has a linked moodboard. Unlink it before linking another." });
         }
 
         return null; // No error: linking is allowed.
