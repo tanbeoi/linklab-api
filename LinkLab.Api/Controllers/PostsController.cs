@@ -167,6 +167,28 @@ public PostsController(
     public async Task<IActionResult> List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10)
+        => await ListPostsAsync(_db.CollabPosts.AsNoTracking(), page, pageSize);
+
+    [Authorize]
+    [HttpGet("mine")]
+    [ProducesResponseType(typeof(PagedResponse<CollabPostResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ListMine(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized(new { error = "Invalid token user." });
+
+        return await ListPostsAsync(
+            _db.CollabPosts.AsNoTracking().Where(p => p.UserId == userId.Value),
+            page, pageSize);
+    }
+
+    private async Task<IActionResult> ListPostsAsync(
+        IQueryable<CollabPost> query, int page, int pageSize)
     {
         // 1. Validate pagination values
         if (page < 1)
@@ -186,10 +208,6 @@ public PostsController(
         }
 
         var currentUserId = GetCurrentUserId();
-
-        // 2. Build the base query
-        var query = _db.CollabPosts
-            .AsNoTracking();
 
         // 3. Count all matching posts
         var totalCount = await query.CountAsync();

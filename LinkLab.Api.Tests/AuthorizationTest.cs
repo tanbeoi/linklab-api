@@ -288,6 +288,135 @@ public class AuthorizationTests
         Assert.True(result.HasNextPage);
     }
 
+    [Theory]
+    [InlineData("/api/posts/mine")]
+    [InlineData("/api/applications/mine")]
+    [InlineData("/api/applications/mine/accepted")]
+    [InlineData("/api/applications/received")]
+    public async Task Mine_RequiresAuthentication_AndValidatesPagination(string path)
+    {
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.GetAsync(path)).StatusCode);
+        var token = await CreateTestUserAndGetTokenAsync();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        foreach (var query in new[] { "?page=0", "?pageSize=0", "?pageSize=51" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await _client.GetAsync(path + query)).StatusCode);
+
+        var response = await _client.GetAsync(path);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(0, body.GetProperty("totalCount").GetInt32());
+        Assert.Equal(0, body.GetProperty("items").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Mine_FiltersBeforePagination_AndReturnsApplicationDetails()
+    {
+        var ownerToken = await CreateTestUserAndGetTokenAsync();
+        var applicantToken = await CreateTestUserAndGetTokenAsync();
+
+        async Task<CollabPostResponse> CreatePost(string token, string title)
+        {
+            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var response = await _client.PostAsJsonAsync("/api/posts", new
+            {
+                title, description = "A collaboration for testing", location = "Melbourne", isRemote = false
+            });
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<CollabPostResponse>())!;
+        }
+
+        var first = await CreatePost(ownerToken, "Owner first post");
+        var second = await CreatePost(ownerToken, "Owner second post");
+        var other = await CreatePost(applicantToken, "Another user's post");
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var mine = await _client.GetFromJsonAsync<PagedResponse<CollabPostResponse>>("/api/posts/mine?page=2&pageSize=1");
+        Assert.NotNull(mine);
+        Assert.Equal(2, mine.TotalCount);
+        Assert.Equal(2, mine.TotalPages);
+        Assert.Equal(first.Id, Assert.Single(mine.Items).Id);
+        Assert.True(mine.HasPreviousPage);
+        Assert.False(mine.HasNextPage);
+        Assert.Empty(mine.Items[0].MoodboardPreviewImageUrls);
+        var beyond = await _client.GetFromJsonAsync<PagedResponse<CollabPostResponse>>("/api/posts/mine?page=3&pageSize=1");
+        Assert.Empty(beyond!.Items);
+
+        // This application must not appear in the applicant's list.
+        (await _client.PostAsJsonAsync($"/api/posts/{other.Id}/apply", new { message = "Owner's application" })).EnsureSuccessStatusCode();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", applicantToken);
+        var applicationResponse = await _client.PostAsJsonAsync($"/api/posts/{first.Id}/apply", new { message = "My first application" });
+        applicationResponse.EnsureSuccessStatusCode();
+        var application = await applicationResponse.Content.ReadFromJsonAsync<ApplicationResponse>();
+        (await _client.PostAsJsonAsync($"/api/posts/{second.Id}/apply", new { message = "My second application" })).EnsureSuccessStatusCode();
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        (await _client.PostAsync($"/api/applications/{application!.Id}/accept", null)).EnsureSuccessStatusCode();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", applicantToken);
+        var applications = await _client.GetFromJsonAsync<PagedResponse<MyApplicationResponse>>("/api/applications/mine?page=2&pageSize=1");
+        Assert.NotNull(applications);
+        Assert.Equal(2, applications.TotalCount);
+        Assert.Equal(2, applications.TotalPages);
+        var item = Assert.Single(applications.Items);
+        Assert.Equal(application.Id, item.Id);
+        Assert.Equal(first.Id, item.PostId);
+        Assert.Equal(first.Title, item.PostTitle);
+        Assert.Equal("My first application", item.Message);
+        Assert.Equal("Accepted", item.Status);
+        Assert.Equal(application.CreatedAtUtc, item.CreatedAtUtc);
+        Assert.NotNull(item.DecidedAtUtc);
+        var pending = await _client.GetFromJsonAsync<PagedResponse<MyApplicationResponse>>("/api/applications/mine?pageSize=1");
+        Assert.Equal("Pending", Assert.Single(pending!.Items).Status);
+        Assert.Null(pending.Items[0].DecidedAtUtc);
+
+        var accepted = await _client.GetFromJsonAsync<PagedResponse<MyApplicationResponse>>(
+            "/api/applications/mine/accepted?pageSize=1");
+        Assert.Equal(1, accepted!.TotalCount);
+        Assert.Equal(application.Id, Assert.Single(accepted.Items).Id);
+        Assert.Equal(first.Title, accepted.Items[0].PostTitle);
+        Assert.Equal("Accepted", accepted.Items[0].Status);
+        Assert.NotNull(accepted.Items[0].DecidedAtUtc);
+        var acceptedBeyond = await _client.GetFromJsonAsync<PagedResponse<MyApplicationResponse>>(
+            "/api/applications/mine/accepted?page=2&pageSize=1");
+        Assert.Equal(1, acceptedBeyond!.TotalCount);
+        Assert.Empty(acceptedBeyond.Items);
+
+        // The applicant owns only the other post, so receives just the owner's application.
+        var applicantReceived = await _client.GetFromJsonAsync<PagedResponse<ReceivedApplicationResponse>>(
+            "/api/applications/received");
+        Assert.Equal(other.Id, Assert.Single(applicantReceived!.Items).PostId);
+        (await _client.PostAsync($"/api/applications/{applicantReceived.Items[0].Id}/accept", null))
+            .EnsureSuccessStatusCode();
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
+        var received = await _client.GetFromJsonAsync<PagedResponse<ReceivedApplicationResponse>>(
+            "/api/applications/received?page=2&pageSize=1");
+        Assert.Equal(2, received!.TotalCount);
+        Assert.Equal(2, received.TotalPages);
+        Assert.True(received.HasPreviousPage);
+        Assert.False(received.HasNextPage);
+        var receivedItem = Assert.Single(received.Items);
+        Assert.Equal(application.Id, receivedItem.Id);
+        Assert.Equal(first.Title, receivedItem.PostTitle);
+        Assert.Equal(other.UserId, receivedItem.ApplicantUserId);
+        Assert.Equal("Test User", receivedItem.ApplicantDisplayName);
+        Assert.Equal("My first application", receivedItem.Message);
+        Assert.Equal("Accepted", receivedItem.Status);
+        Assert.Equal(application.CreatedAtUtc, receivedItem.CreatedAtUtc);
+        Assert.NotNull(receivedItem.DecidedAtUtc);
+        var receivedFirst = await _client.GetFromJsonAsync<PagedResponse<ReceivedApplicationResponse>>(
+            "/api/applications/received?pageSize=1");
+        Assert.Equal(second.Id, Assert.Single(receivedFirst!.Items).PostId);
+        (await _client.PostAsync($"/api/applications/{pending.Items[0].Id}/reject", null))
+            .EnsureSuccessStatusCode();
+
+        // Exclude both rejected applications and another user's accepted application.
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", applicantToken);
+        accepted = await _client.GetFromJsonAsync<PagedResponse<MyApplicationResponse>>(
+            "/api/applications/mine/accepted");
+        Assert.Equal(1, accepted!.TotalCount);
+        Assert.Equal(application.Id, Assert.Single(accepted.Items).Id);
+    }
+
     // Helper method
     private async Task<string> CreateTestUserAndGetTokenAsync()
     {
