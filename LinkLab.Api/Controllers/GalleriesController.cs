@@ -273,6 +273,103 @@ public class GalleriesController : ControllerBase
         return Ok(galleries);
     }
 
+    // Read one gallery. Published galleries are public; draft galleries are visible
+    // only to their owner. The editor uses this endpoint for its initial details.
+    [AllowAnonymous]
+    [HttpGet("{galleryId:guid}")]
+    public async Task<IActionResult> Get(Guid galleryId)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        Guid? currentUserId = Guid.TryParse(userIdText, out var userId)
+            ? userId
+            : null;
+
+        var gallery = await _db.Galleries
+            .AsNoTracking()
+            .Where(g => g.Id == galleryId)
+            .Select(g => new GalleryResponse
+            {
+                Id = g.Id,
+                Title = g.Title,
+                Description = g.Description,
+                Purpose = g.Purpose,
+                OwnerId = g.OwnerId,
+                IsPublished = g.IsPublished,
+                CollabPostId = g.CollabPostId,
+                CollabPostTitle = g.CollabPost == null ? null : g.CollabPost.Title,
+                SortOrder = g.SortOrder,
+                CreatedAtUtc = g.CreatedAtUtc,
+                PublishedAtUtc = g.PublishedAtUtc,
+                PhotoCount = g.Photos.Count,
+                OwnerDisplayName = g.Owner.DisplayName
+            })
+            .FirstOrDefaultAsync();
+
+        if (gallery is null || (!gallery.IsPublished && gallery.OwnerId != currentUserId))
+            return NotFound(new { error = "Gallery not found." });
+
+        await AddPreviewImagesAsync(new[] { gallery });
+        return Ok(gallery);
+    }
+
+    [Authorize]
+    [HttpPut("{galleryId:guid}")]
+    public async Task<IActionResult> Update(Guid galleryId, UpdateGalleryRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var gallery = await _db.Galleries
+            .FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        var title = (req.Title ?? string.Empty).Trim();
+        var description = (req.Description ?? string.Empty).Trim();
+
+        if (string.IsNullOrWhiteSpace(title))
+            return BadRequest(new { error = "Gallery title is required." });
+
+        if (title.Length > 150)
+            return BadRequest(new { error = "Title must be 150 characters or less." });
+
+        if (description.Length > 2000)
+            return BadRequest(new { error = "Description must be 2000 characters or less." });
+
+        if (!Enum.IsDefined(req.Purpose))
+            return BadRequest(new { error = "Invalid gallery purpose." });
+
+        if (gallery.CollabPostId.HasValue)
+        {
+            var linkError = await ValidateCollabPostLinkAsync(
+                userId,
+                gallery.CollabPostId.Value,
+                req.Purpose,
+                gallery.Id);
+
+            if (linkError is not null)
+                return linkError;
+        }
+
+        gallery.Title = title;
+        gallery.Description = string.IsNullOrWhiteSpace(description) ? null : description;
+        gallery.Purpose = req.Purpose;
+
+        var saveError = await SaveGalleryChangesAsync();
+        if (saveError is not null)
+            return saveError;
+
+        return Ok(new
+        {
+            gallery.Id,
+            gallery.Title,
+            gallery.Description,
+            gallery.Purpose
+        });
+    }
+
     // List all public galleries (public)
     [HttpGet]
     [ProducesResponseType(
@@ -564,10 +661,41 @@ public class GalleriesController : ControllerBase
             });
         }
 
-        // Find the next sort order for the photo in the gallery
-        var nextSortOrder = await _db.Photos
-            .Where(p => p.GalleryId == galleryId)
-            .MaxAsync(p => (int?)p.SortOrder) ?? -1;
+        int nextSortOrder;
+
+        if (req.InsertAtStart || req.InsertAfterPhotoId.HasValue)
+        {
+            var photos = await _db.Photos
+                .Where(p => p.GalleryId == galleryId)
+                .OrderBy(p => p.SortOrder)
+                .ThenBy(p => p.CreatedAtUtc)
+                .ThenBy(p => p.Id)
+                .ToListAsync();
+
+            var insertIndex = 0;
+
+            if (req.InsertAfterPhotoId.HasValue)
+            {
+                insertIndex = photos.FindIndex(p => p.Id == req.InsertAfterPhotoId.Value);
+                if (insertIndex < 0)
+                    return BadRequest(new { error = "The insertion photo does not belong to this gallery." });
+
+                insertIndex++;
+            }
+
+            for (var index = insertIndex; index < photos.Count; index++)
+                photos[index].SortOrder = index + 1;
+
+            nextSortOrder = insertIndex;
+        }
+        else
+        {
+            nextSortOrder = await _db.Photos
+                .Where(p => p.GalleryId == galleryId)
+                .MaxAsync(p => (int?)p.SortOrder) ?? -1;
+
+            nextSortOrder++;
+        }
 
         // 5. Create a new photo entity and save it to the database
         var photo = new Photo
@@ -576,7 +704,7 @@ public class GalleriesController : ControllerBase
             GalleryId = galleryId,
             ObjectKey = objectKey,
             Caption = string.IsNullOrWhiteSpace(req.Caption) ? null : req.Caption.Trim(),
-            SortOrder = nextSortOrder + 1,
+            SortOrder = nextSortOrder,
             CreatedAtUtc = DateTime.UtcNow
         };
 
