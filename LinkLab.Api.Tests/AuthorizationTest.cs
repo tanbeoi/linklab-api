@@ -4,6 +4,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using LinkLab.Api.Dto;
+using LinkLab.Api.Data;
+using LinkLab.Api.Domain;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace LinkLab.Api.Tests;
 
@@ -415,6 +418,43 @@ public class AuthorizationTests
             "/api/applications/mine/accepted");
         Assert.Equal(1, accepted!.TotalCount);
         Assert.Equal(application.Id, Assert.Single(accepted.Items).Id);
+    }
+
+    [Fact]
+    public async Task PostMoodboard_ReturnsPublishedGalleryCreator_AndHidesDrafts()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var postOwner = new User { Email = "post-owner@test.com", DisplayName = "Post Owner", PasswordHash = "unused" };
+        var creator = new User { Email = "gallery-owner@test.com", DisplayName = "Moodboard Creator", PasswordHash = "unused" };
+        var post = new CollabPost { User = postOwner, Title = "Test post" };
+        var gallery = new Gallery
+        {
+            Title = "Visual direction", Owner = creator, CollabPost = post,
+            Purpose = GalleryPurpose.Moodboard
+        };
+        db.Galleries.Add(gallery);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/posts/{post.Id}/moodboard")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/posts/{Guid.NewGuid()}/moodboard")).StatusCode);
+
+        gallery.IsPublished = true;
+        await db.SaveChangesAsync();
+        var response = await _client.GetFromJsonAsync<GalleryResponse>($"/api/posts/{post.Id}/moodboard");
+        Assert.NotNull(response);
+        Assert.Equal(gallery.Id, response.Id);
+        Assert.Equal(creator.Id, response.OwnerId);
+        Assert.Equal("Moodboard Creator", response.OwnerDisplayName);
+        Assert.Equal(gallery.Title, response.Title);
+        Assert.Equal(post.Id, response.CollabPostId);
+
+        gallery.Purpose = GalleryPurpose.Portfolio;
+        await db.SaveChangesAsync();
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/posts/{post.Id}/moodboard")).StatusCode);
     }
 
     // Helper method

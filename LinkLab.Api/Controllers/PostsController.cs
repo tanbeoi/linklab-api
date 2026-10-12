@@ -259,6 +259,38 @@ public PostsController(
         });
     }
 
+    [HttpGet("{id:guid}/moodboard")]
+    [ProducesResponseType(typeof(GalleryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMoodboard(Guid id)
+    {
+        var gallery = await _db.Galleries.AsNoTracking()
+            .Where(g => g.CollabPostId == id &&
+                g.Purpose == GalleryPurpose.Moodboard && g.IsPublished)
+            .Select(g => new GalleryResponse
+            {
+                Id = g.Id,
+                Title = g.Title,
+                Description = g.Description,
+                Purpose = g.Purpose,
+                IsPublished = g.IsPublished,
+                OwnerId = g.OwnerId,
+                OwnerDisplayName = g.Owner.DisplayName,
+                CollabPostId = g.CollabPostId,
+                CollabPostTitle = g.CollabPost!.Title,
+                SortOrder = g.SortOrder,
+                CreatedAtUtc = g.CreatedAtUtc,
+                PublishedAtUtc = g.PublishedAtUtc,
+                PhotoCount = g.Photos.Count
+            })
+            .FirstOrDefaultAsync();
+
+        if (gallery is null)
+            return NotFound(new { error = "No published moodboard found for this post." });
+
+        return Ok(gallery);
+    }
+
     // [x] View post (public)
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)

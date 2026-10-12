@@ -396,6 +396,7 @@ public class GalleriesController : ControllerBase
             .Where(p => p.GalleryId == galleryId)
             .OrderBy(p => p.SortOrder)
             .ThenBy(p => p.CreatedAtUtc)
+            .ThenBy(p => p.Id)
             .ToListAsync();
 
         var res = photos.Select(p => new PhotoResponse

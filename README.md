@@ -121,6 +121,7 @@ In Swagger, select **Authorize** and enter the JWT to test protected endpoints.
 | `GET` | `/api/applications/mine/accepted` | Authenticated | List your accepted applications (collaborations you joined) |
 | `GET` | `/api/applications/received` | Authenticated | List applications across your own posts, including post and applicant details |
 | `GET` | `/api/posts/{id}` | Public | Get one collaboration post |
+| `GET` | `/api/posts/{id}/moodboard` | Public | Get the linked published moodboard and its creator for the gallery viewer |
 | `POST` | `/api/posts` | Authenticated | Create a collaboration post |
 | `POST` | `/api/posts/{postId}/apply` | Authenticated | Apply to a collaboration post |
 | `GET` | `/api/posts/{postId}/applications` | Post owner | List applications for a post |
