@@ -514,6 +514,8 @@ public class GalleriesController : ControllerBase
             SortOrder = p.SortOrder,
             BoardX = p.BoardX,
             BoardY = p.BoardY,
+            BoardWidth = p.BoardWidth,
+            CaptionHeight = p.CaptionHeight,
             BoardZIndex = p.BoardZIndex,
             CreatedAtUtc = p.CreatedAtUtc
         });
@@ -539,6 +541,18 @@ public class GalleriesController : ControllerBase
             return BadRequest(new { error = "The photo position is outside the moodboard canvas." });
         }
 
+        if (req.BoardWidth.HasValue &&
+            (!double.IsFinite(req.BoardWidth.Value) || req.BoardWidth.Value < 120 || req.BoardWidth.Value > MoodboardCanvasWidth))
+        {
+            return BadRequest(new { error = "The image width must fit within the moodboard canvas." });
+        }
+
+        if (req.CaptionHeight.HasValue &&
+            (!double.IsFinite(req.CaptionHeight.Value) || req.CaptionHeight.Value < 40 || req.CaptionHeight.Value > 320))
+        {
+            return BadRequest(new { error = "The caption height must be between 40 and 320 pixels." });
+        }
+
         var gallery = await _db.Galleries
             .AsNoTracking()
             .FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
@@ -561,6 +575,10 @@ public class GalleriesController : ControllerBase
 
         photo.BoardX = req.BoardX;
         photo.BoardY = req.BoardY;
+        if (req.BoardWidth.HasValue)
+            photo.BoardWidth = req.BoardWidth.Value;
+        if (req.CaptionHeight.HasValue)
+            photo.CaptionHeight = req.CaptionHeight.Value;
         photo.BoardZIndex = nextZIndex + 1;
         await _db.SaveChangesAsync();
 
@@ -580,6 +598,8 @@ public class GalleriesController : ControllerBase
             SortOrder = photo.SortOrder,
             BoardX = photo.BoardX,
             BoardY = photo.BoardY,
+            BoardWidth = photo.BoardWidth,
+            CaptionHeight = photo.CaptionHeight,
             BoardZIndex = photo.BoardZIndex,
             CreatedAtUtc = photo.CreatedAtUtc
         });
@@ -604,8 +624,8 @@ public class GalleriesController : ControllerBase
             return BadRequest(new { error = "Each photo can only be updated once." });
         }
 
-        if (req.Captions.Any(caption => caption.Caption?.Length > 1000))
-            return BadRequest(new { error = "Photo captions must be 1,000 characters or fewer." });
+        if (req.Captions.Any(caption => caption.Caption?.Length > 500))
+            return BadRequest(new { error = "Photo captions must be 500 characters or fewer." });
 
         var ownsGallery = await _db.Galleries
             .AsNoTracking()
@@ -907,6 +927,8 @@ public class GalleriesController : ControllerBase
             SortOrder = photo.SortOrder,
             BoardX = photo.BoardX,
             BoardY = photo.BoardY,
+            BoardWidth = photo.BoardWidth,
+            CaptionHeight = photo.CaptionHeight,
             BoardZIndex = photo.BoardZIndex,
             CreatedAtUtc = photo.CreatedAtUtc
         };

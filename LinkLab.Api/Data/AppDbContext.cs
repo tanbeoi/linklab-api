@@ -129,6 +129,12 @@ public class AppDbContext : DbContext
             entity.Property(p => p.BoardY)
                 .HasColumnType("double precision");
 
+            entity.Property(p => p.BoardWidth)
+                .HasColumnType("double precision");
+
+            entity.Property(p => p.CaptionHeight)
+                .HasColumnType("double precision");
+
             entity.Property(p => p.BoardZIndex);
 
             entity.Property(p => p.CreatedAtUtc)

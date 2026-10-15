@@ -157,6 +157,9 @@ namespace LinkLab.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<double?>("BoardWidth")
+                        .HasColumnType("double precision");
+
                     b.Property<double?>("BoardX")
                         .HasColumnType("double precision");
 
@@ -169,6 +172,9 @@ namespace LinkLab.Api.Migrations
                     b.Property<string>("Caption")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<double?>("CaptionHeight")
+                        .HasColumnType("double precision");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");

@@ -10,6 +10,8 @@ public class PhotoResponse
     public int SortOrder { get; set; }
     public double? BoardX { get; set; }
     public double? BoardY { get; set; }
+    public double? BoardWidth { get; set; }
+    public double? CaptionHeight { get; set; }
     public int? BoardZIndex { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }

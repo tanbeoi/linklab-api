@@ -11,6 +11,10 @@ public class Photo
     // Null means the moodboard photo is still in the owner's Unsorted tray.
     public double? BoardX { get; set; }
     public double? BoardY { get; set; }
+    // Null uses the standard rendered image width in the moodboard editor.
+    public double? BoardWidth { get; set; }
+    // Null uses the standard rendered caption height in the moodboard editor.
+    public double? CaptionHeight { get; set; }
     public int? BoardZIndex { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
