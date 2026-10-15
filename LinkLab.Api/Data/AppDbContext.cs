@@ -123,6 +123,14 @@ public class AppDbContext : DbContext
             entity.Property(p => p.SortOrder)
                 .IsRequired();
 
+            entity.Property(p => p.BoardX)
+                .HasColumnType("double precision");
+
+            entity.Property(p => p.BoardY)
+                .HasColumnType("double precision");
+
+            entity.Property(p => p.BoardZIndex);
+
             entity.Property(p => p.CreatedAtUtc)
                 .IsRequired();
 

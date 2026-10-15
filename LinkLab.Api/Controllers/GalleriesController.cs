@@ -19,6 +19,8 @@ namespace LinkLab.Api.Controllers;
 [Route("api/galleries")]
 public class GalleriesController : ControllerBase
 {
+    private const double MoodboardCanvasWidth = 2400;
+    private const double MoodboardCanvasHeight = 1600;
     private readonly AppDbContext _db;
     private readonly IAmazonS3 _s3;
     private readonly S3Options _s3Options;
@@ -510,10 +512,125 @@ public class GalleriesController : ControllerBase
             }),
             Caption = p.Caption,
             SortOrder = p.SortOrder,
+            BoardX = p.BoardX,
+            BoardY = p.BoardY,
+            BoardZIndex = p.BoardZIndex,
             CreatedAtUtc = p.CreatedAtUtc
         });
 
         return Ok(res);
+    }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/photos/{photoId:guid}/board-position")]
+    public async Task<IActionResult> UpdatePhotoBoardPosition(
+        Guid galleryId,
+        Guid photoId,
+        UpdatePhotoBoardPositionRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        if (!double.IsFinite(req.BoardX) || !double.IsFinite(req.BoardY) ||
+            req.BoardX < 0 || req.BoardX > MoodboardCanvasWidth ||
+            req.BoardY < 0 || req.BoardY > MoodboardCanvasHeight)
+        {
+            return BadRequest(new { error = "The photo position is outside the moodboard canvas." });
+        }
+
+        var gallery = await _db.Galleries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        if (gallery.Purpose != GalleryPurpose.Moodboard)
+            return BadRequest(new { error = "Only moodboard photos can be positioned on a board." });
+
+        var photo = await _db.Photos
+            .FirstOrDefaultAsync(p => p.Id == photoId && p.GalleryId == galleryId);
+
+        if (photo is null)
+            return NotFound(new { error = "Photo not found." });
+
+        var nextZIndex = await _db.Photos
+            .Where(p => p.GalleryId == galleryId)
+            .MaxAsync(p => (int?)p.BoardZIndex) ?? 0;
+
+        photo.BoardX = req.BoardX;
+        photo.BoardY = req.BoardY;
+        photo.BoardZIndex = nextZIndex + 1;
+        await _db.SaveChangesAsync();
+
+        return Ok(new PhotoResponse
+        {
+            Id = photo.Id,
+            GalleryId = photo.GalleryId,
+            ObjectKey = photo.ObjectKey,
+            ImageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = _s3Options.BucketName,
+                Key = photo.ObjectKey,
+                Verb = HttpVerb.GET,
+                Expires = DateTime.UtcNow.AddMinutes(30)
+            }),
+            Caption = photo.Caption,
+            SortOrder = photo.SortOrder,
+            BoardX = photo.BoardX,
+            BoardY = photo.BoardY,
+            BoardZIndex = photo.BoardZIndex,
+            CreatedAtUtc = photo.CreatedAtUtc
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/photos/captions")]
+    public async Task<IActionResult> UpdatePhotoCaptions(
+        Guid galleryId,
+        UpdatePhotoCaptionsRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        if (req.Captions.Count == 0)
+            return NoContent();
+
+        if (req.Captions.Any(caption => caption.PhotoId == Guid.Empty) ||
+            req.Captions.Select(caption => caption.PhotoId).Distinct().Count() != req.Captions.Count)
+        {
+            return BadRequest(new { error = "Each photo can only be updated once." });
+        }
+
+        if (req.Captions.Any(caption => caption.Caption?.Length > 1000))
+            return BadRequest(new { error = "Photo captions must be 1,000 characters or fewer." });
+
+        var ownsGallery = await _db.Galleries
+            .AsNoTracking()
+            .AnyAsync(gallery => gallery.Id == galleryId && gallery.OwnerId == userId);
+
+        if (!ownsGallery)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        var requestedPhotoIds = req.Captions.Select(caption => caption.PhotoId).ToList();
+        var photos = await _db.Photos
+            .Where(photo => photo.GalleryId == galleryId && requestedPhotoIds.Contains(photo.Id))
+            .ToListAsync();
+
+        if (photos.Count != requestedPhotoIds.Count)
+            return BadRequest(new { error = "One or more photos do not belong to this gallery." });
+
+        var captionsByPhotoId = req.Captions.ToDictionary(caption => caption.PhotoId, caption => caption.Caption);
+        foreach (var photo in photos)
+        {
+            var caption = captionsByPhotoId[photo.Id]?.Trim();
+            photo.Caption = string.IsNullOrWhiteSpace(caption) ? null : caption;
+        }
+
+        await _db.SaveChangesAsync();
+        return NoContent();
     }
 
     // [x] Create photo upload URL (auth required)
@@ -584,6 +701,64 @@ public class GalleriesController : ControllerBase
         return Ok(res);
     }
 
+    // Upload a photo through the API. This avoids requiring browser CORS access to S3.
+    [Authorize]
+    [HttpPost("{galleryId:guid}/photos/upload")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UploadPhotoToGallery(
+        Guid galleryId,
+        [FromForm] IFormFile? file,
+        [FromForm] Guid? insertAfterPhotoId,
+        [FromForm] bool insertAtStart = false)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var ownsGallery = await _db.Galleries
+            .AsNoTracking()
+            .AnyAsync(gallery => gallery.Id == galleryId && gallery.OwnerId == userId);
+
+        if (!ownsGallery)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        if (file is null || file.Length == 0)
+            return BadRequest(new { error = "Choose an image to upload." });
+
+        var contentType = (file.ContentType ?? string.Empty).Trim().ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrEmpty(extension))
+            return BadRequest(new { error = "Only jpeg, png, and webp images are allowed." });
+
+        var photoId = Guid.NewGuid();
+        var objectKey = $"users/{userId}/galleries/{galleryId}/photos/{photoId}{extension}";
+
+        await using var stream = file.OpenReadStream();
+        await _s3.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            InputStream = stream,
+            ContentType = contentType
+        }, HttpContext.RequestAborted);
+
+        return await AddPhotoToGallery(galleryId, new AddPhotoToGalleryRequest
+        {
+            PhotoId = photoId,
+            ObjectKey = objectKey,
+            InsertAtStart = insertAtStart,
+            InsertAfterPhotoId = insertAfterPhotoId
+        });
+    }
+
     // [x] Add photo to database (auth required)
     [Authorize]
     [HttpPost("{galleryId:guid}/photos")]
@@ -598,11 +773,13 @@ public class GalleriesController : ControllerBase
             return Unauthorized(new { error = "Invalid token user." });
 
         // 2. Check if the gallery exists and belongs to the current user
-        var galleryExists = await _db.Galleries
+        var gallery = await _db.Galleries
             .AsNoTracking()
-            .AnyAsync(g => g.Id == galleryId && g.OwnerId == userId);
+            .Where(g => g.Id == galleryId && g.OwnerId == userId)
+            .Select(g => new { g.Purpose })
+            .FirstOrDefaultAsync();
 
-        if (!galleryExists)
+        if (gallery is null)
             return NotFound(new { error = "Gallery not found." });
 
 
@@ -663,7 +840,8 @@ public class GalleriesController : ControllerBase
 
         int nextSortOrder;
 
-        if (req.InsertAtStart || req.InsertAfterPhotoId.HasValue)
+        if (gallery.Purpose != GalleryPurpose.Moodboard &&
+            (req.InsertAtStart || req.InsertAfterPhotoId.HasValue))
         {
             var photos = await _db.Photos
                 .Where(p => p.GalleryId == galleryId)
@@ -727,6 +905,9 @@ public class GalleriesController : ControllerBase
             ImageUrl = imageUrl,
             Caption = photo.Caption,
             SortOrder = photo.SortOrder,
+            BoardX = photo.BoardX,
+            BoardY = photo.BoardY,
+            BoardZIndex = photo.BoardZIndex,
             CreatedAtUtc = photo.CreatedAtUtc
         };
 

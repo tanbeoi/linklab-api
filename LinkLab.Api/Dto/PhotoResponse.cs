@@ -8,5 +8,8 @@ public class PhotoResponse
     public string ImageUrl { get; set; } = string.Empty;
     public string? Caption { get; set; }
     public int SortOrder { get; set; }
+    public double? BoardX { get; set; }
+    public double? BoardY { get; set; }
+    public int? BoardZIndex { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }

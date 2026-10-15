@@ -157,6 +157,15 @@ namespace LinkLab.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<double?>("BoardX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("BoardY")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("BoardZIndex")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Caption")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");

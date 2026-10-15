@@ -8,5 +8,9 @@ public class Photo
     public string ObjectKey { get; set; } = string.Empty;
     public string? Caption { get; set; }
     public int SortOrder { get; set; }
+    // Null means the moodboard photo is still in the owner's Unsorted tray.
+    public double? BoardX { get; set; }
+    public double? BoardY { get; set; }
+    public int? BoardZIndex { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
