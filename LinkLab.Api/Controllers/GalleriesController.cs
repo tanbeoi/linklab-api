@@ -653,6 +653,37 @@ public class GalleriesController : ControllerBase
         return NoContent();
     }
 
+    // Permanently remove a photo the current user owns. This also removes the
+    // original object from S3 so deleted moodboard cards do not leave orphaned files.
+    [Authorize]
+    [HttpDelete("{galleryId:guid}/photos/{photoId:guid}")]
+    public async Task<IActionResult> DeletePhoto(Guid galleryId, Guid photoId)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var photo = await _db.Photos
+            .Include(candidate => candidate.Gallery)
+            .FirstOrDefaultAsync(candidate =>
+                candidate.Id == photoId &&
+                candidate.GalleryId == galleryId &&
+                candidate.Gallery.OwnerId == userId);
+
+        if (photo is null)
+            return NotFound(new { error = "Photo not found." });
+
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = photo.ObjectKey
+        }, HttpContext.RequestAborted);
+
+        _db.Photos.Remove(photo);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // [x] Create photo upload URL (auth required)
     [Authorize]
     [HttpPost("{galleryId:guid}/photos/upload-url")]
