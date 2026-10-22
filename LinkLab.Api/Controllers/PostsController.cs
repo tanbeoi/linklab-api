@@ -202,6 +202,50 @@ public PostsController(
         return CreatedAtAction(nameof(GetById), new { id = post.Id }, res);
     }
 
+    // Owners can update the details of a collaboration post.
+    [Authorize]
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, UpdateCollabPostRequest req)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var post = await _db.CollabPosts
+            .FirstOrDefaultAsync(post => post.Id == id && post.UserId == userId.Value);
+
+        if (post is null)
+            return NotFound(new { error = "Post not found." });
+
+        var title = (req.Title ?? string.Empty).Trim();
+        var description = (req.Description ?? string.Empty).Trim();
+        var location = (req.Location ?? string.Empty).Trim();
+
+        if (title.Length < 5 || title.Length > 100)
+            return BadRequest(new { error = "Title must be 5-100 characters." });
+
+        if (description.Length < 5 || description.Length > 2000)
+            return BadRequest(new { error = "Description must be 5-2000 characters." });
+
+        if (location.Length > 100)
+            return BadRequest(new { error = "Location must be <= 100 characters." });
+
+        post.Title = title;
+        post.Description = description;
+        post.Location = location;
+        post.IsRemote = req.IsRemote;
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            post.Id,
+            post.Title,
+            post.Description,
+            post.Location,
+            post.IsRemote
+        });
+    }
+
     // [x] List posts (public)
     [HttpGet]
     [ProducesResponseType(
