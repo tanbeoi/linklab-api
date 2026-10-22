@@ -40,7 +40,7 @@ public PostsController(
             : null;
     }
 
-    private async Task<List<CollabPostResponse>> AddMoodboardPreviewsAsync(
+    private async Task<List<CollabPostResponse>> AddGalleryPreviewsAsync(
         IReadOnlyList<CollabPostResponse> posts)
     {
         if (posts.Count == 0)
@@ -72,16 +72,40 @@ public PostsController(
             .ToListAsync();
 
         var moodboardsByPostId = moodboards.ToDictionary(m => m.PostId);
+
+        var portfolios = await _db.Galleries
+            .AsNoTracking()
+            .Where(g =>
+                g.CollabPostId.HasValue &&
+                postIds.Contains(g.CollabPostId.Value) &&
+                g.Purpose == GalleryPurpose.Portfolio &&
+                g.IsPublished)
+            .OrderByDescending(g => g.PublishedAtUtc)
+            .ThenByDescending(g => g.CreatedAtUtc)
+            .Select(g => new
+            {
+                PostId = g.CollabPostId!.Value,
+                g.Id,
+                g.Title,
+                OwnerDisplayName = g.Owner.DisplayName,
+                PhotoCount = g.Photos.Count,
+                PreviewObjectKey = g.Photos
+                    .OrderBy(p => p.SortOrder)
+                    .ThenBy(p => p.Id)
+                    .Select(p => p.ObjectKey)
+                    .FirstOrDefault()
+            })
+            .ToListAsync();
+
+        var portfoliosByPostId = portfolios
+            .GroupBy(portfolio => portfolio.PostId)
+            .ToDictionary(group => group.Key, group => group.ToList());
         var expiresAtUtc = DateTime.UtcNow.AddMinutes(30);
 
         return posts.Select(post =>
         {
-            // If no moodboard exists for this post, return the post as-is.
-            if (!moodboardsByPostId.TryGetValue(post.Id, out var moodboard))
-                return post;
-
-            // Generate URLs after the database query has completed.
-            var imageUrls = moodboard.ObjectKeys
+            var imageUrls = moodboardsByPostId.TryGetValue(post.Id, out var moodboard)
+                ? moodboard.ObjectKeys
                 .Select(key => _s3.GetPreSignedURL(new GetPreSignedUrlRequest
                 {
                     BucketName = _s3Options.BucketName,
@@ -89,13 +113,32 @@ public PostsController(
                     Verb = HttpVerb.GET,
                     Expires = expiresAtUtc
                 }))
-                .ToList();
+                .ToList()
+                : new List<string>();
+
+            var portfolioGalleries = portfoliosByPostId.TryGetValue(post.Id, out var linkedPortfolios)
+                ? linkedPortfolios.Select(portfolio => new PortfolioGalleryPreview(
+                    portfolio.Id,
+                    portfolio.Title,
+                    portfolio.OwnerDisplayName,
+                    string.IsNullOrEmpty(portfolio.PreviewObjectKey)
+                        ? null
+                        : _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+                        {
+                            BucketName = _s3Options.BucketName,
+                            Key = portfolio.PreviewObjectKey,
+                            Verb = HttpVerb.GET,
+                            Expires = expiresAtUtc
+                        }),
+                    portfolio.PhotoCount
+                )).ToList()
+                : new List<PortfolioGalleryPreview>();
             
-            // return a new CollabPostResponse with the moodboard data included
             return post with
             {
                 MoodboardPreviewImageUrls = imageUrls,
-                MoodboardPhotoCount = moodboard.PhotoCount
+                MoodboardPhotoCount = moodboard?.PhotoCount ?? 0,
+                PortfolioGalleries = portfolioGalleries
             };
         }).ToList();
     }
@@ -152,6 +195,7 @@ public PostsController(
             user.DisplayName,
             Array.Empty<string>(),
             0,
+            Array.Empty<PortfolioGalleryPreview>(),
             false
         );
 
@@ -232,13 +276,14 @@ public PostsController(
                 p.User.DisplayName,
                 Array.Empty<string>(), // MoodboardPreviewImageUrls
                 0,                    // MoodboardPhotoCount
+                Array.Empty<PortfolioGalleryPreview>(),
                 currentUserId.HasValue && _db.Applications.Any(a =>
                     a.PostId == p.Id &&
                     a.ApplicantUserId == currentUserId.Value)
             ))
             .ToListAsync();
 
-        posts = await AddMoodboardPreviewsAsync(posts);
+        posts = await AddGalleryPreviewsAsync(posts);
 
         // 6. Calculate the total number of pages
         // Use double for page size to keep decimal precision, then round up to the nearest whole number using Math.Ceiling.
@@ -312,6 +357,7 @@ public PostsController(
                 p.User != null ? p.User.DisplayName : "",
                 Array.Empty<string>(), // MoodboardPreviewImageUrls
                 0,                    // MoodboardPhotoCount
+                Array.Empty<PortfolioGalleryPreview>(),
                 currentUserId.HasValue && _db.Applications.Any(a =>
                     a.PostId == p.Id &&
                     a.ApplicantUserId == currentUserId.Value)
@@ -323,7 +369,7 @@ public PostsController(
         if (post is null) return NotFound(new { error = "Post not found." });
 
         // since post is a single item, we can create a single-item array and return the first item of the result.
-        var enrichedPosts = await AddMoodboardPreviewsAsync(new[] { post });
+        var enrichedPosts = await AddGalleryPreviewsAsync(new[] { post });
 
         return Ok(enrichedPosts[0]);
     }
