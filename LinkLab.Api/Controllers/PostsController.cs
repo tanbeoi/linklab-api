@@ -47,6 +47,14 @@ public PostsController(
             return new List<CollabPostResponse>();
 
         var postIds = posts.Select(p => p.Id).ToList();
+        var currentUserId = GetCurrentUserId();
+        // A post owner can see a collaborator's linked draft portfolio in their
+        // private editor. Linking it to the post is the collaborator's explicit
+        // decision to share that work with the post owner; public visitors still
+        // receive published work only.
+        var postIdsOwnedByCurrentUser = currentUserId.HasValue
+            ? posts.Where(post => post.UserId == currentUserId.Value).Select(post => post.Id).ToList()
+            : new List<Guid>();
 
         // Fetch previews for all returned posts together
         // This avoids N+1 queries and reduces the number of S3 requests.
@@ -79,7 +87,7 @@ public PostsController(
                 g.CollabPostId.HasValue &&
                 postIds.Contains(g.CollabPostId.Value) &&
                 g.Purpose == GalleryPurpose.Portfolio &&
-                g.IsPublished)
+                (g.IsPublished || postIdsOwnedByCurrentUser.Contains(g.CollabPostId.Value)))
             .OrderByDescending(g => g.PublishedAtUtc)
             .ThenByDescending(g => g.CreatedAtUtc)
             .Select(g => new
@@ -196,7 +204,8 @@ public PostsController(
             Array.Empty<string>(),
             0,
             Array.Empty<PortfolioGalleryPreview>(),
-            false
+            false,
+            null
         );
 
         return CreatedAtAction(nameof(GetById), new { id = post.Id }, res);
@@ -327,7 +336,17 @@ public PostsController(
                 Array.Empty<PortfolioGalleryPreview>(),
                 currentUserId.HasValue && _db.Applications.Any(a =>
                     a.PostId == p.Id &&
-                    a.ApplicantUserId == currentUserId.Value)
+                    a.ApplicantUserId == currentUserId.Value),
+                currentUserId.HasValue
+                    ? _db.Applications
+                        .Where(a => a.PostId == p.Id && a.ApplicantUserId == currentUserId.Value)
+                        .Select(a => a.Status == ApplicationStatus.Accepted
+                            ? "Accepted"
+                            : a.Status == ApplicationStatus.Rejected
+                                ? "Rejected"
+                                : "Pending")
+                        .FirstOrDefault()
+                    : null
             ))
             .ToListAsync();
 
@@ -408,7 +427,17 @@ public PostsController(
                 Array.Empty<PortfolioGalleryPreview>(),
                 currentUserId.HasValue && _db.Applications.Any(a =>
                     a.PostId == p.Id &&
-                    a.ApplicantUserId == currentUserId.Value)
+                    a.ApplicantUserId == currentUserId.Value),
+                currentUserId.HasValue
+                    ? _db.Applications
+                        .Where(a => a.PostId == p.Id && a.ApplicantUserId == currentUserId.Value)
+                        .Select(a => a.Status == ApplicationStatus.Accepted
+                            ? "Accepted"
+                            : a.Status == ApplicationStatus.Rejected
+                                ? "Rejected"
+                                : "Pending")
+                        .FirstOrDefault()
+                    : null
             ))
             .FirstOrDefaultAsync();
 
