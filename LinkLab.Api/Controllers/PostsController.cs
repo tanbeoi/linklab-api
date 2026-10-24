@@ -254,8 +254,12 @@ public PostsController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> List(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10)
-        => await ListPostsAsync(_db.CollabPosts.AsNoTracking(), page, pageSize);
+        [FromQuery] int pageSize = 10,
+        [FromQuery] Guid? ownerId = null)
+        => await ListPostsAsync(
+            _db.CollabPosts.AsNoTracking().Where(post => !ownerId.HasValue || post.UserId == ownerId.Value),
+            page,
+            pageSize);
 
     [Authorize]
     [HttpGet("mine")]
