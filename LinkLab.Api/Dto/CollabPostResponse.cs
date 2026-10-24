@@ -18,5 +18,9 @@ public record CollabPostResponse(
     IReadOnlyList<PortfolioGalleryPreview> PortfolioGalleries,
 
     // True only when the authenticated viewer has already applied.
-    bool HasCurrentUserApplied
+    bool HasCurrentUserApplied,
+
+    // The authenticated viewer's current application status, when they have applied.
+    // This lets post views show a meaningful outcome instead of only "Applied".
+    string? CurrentUserApplicationStatus
 );
