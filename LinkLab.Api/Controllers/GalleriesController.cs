@@ -1002,64 +1002,6 @@ public class GalleriesController : ControllerBase
         return Ok(await CreateThumbnailResponseAsync(gallery));
     }
 
-    // Upload a photo through the API. This avoids requiring browser CORS access to S3.
-    [Authorize]
-    [HttpPost("{galleryId:guid}/photos/upload")]
-    [Consumes("multipart/form-data")]
-    public async Task<IActionResult> UploadPhotoToGallery(
-        Guid galleryId,
-        [FromForm] IFormFile? file,
-        [FromForm] Guid? insertAfterPhotoId,
-        [FromForm] bool insertAtStart = false)
-    {
-        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-            return Unauthorized(new { error = "Invalid token user." });
-
-        var ownsGallery = await _db.Galleries
-            .AsNoTracking()
-            .AnyAsync(gallery => gallery.Id == galleryId && gallery.OwnerId == userId);
-
-        if (!ownsGallery)
-            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
-
-        if (file is null || file.Length == 0)
-            return BadRequest(new { error = "Choose an image to upload." });
-
-        var contentType = (file.ContentType ?? string.Empty).Trim().ToLowerInvariant();
-        var extension = contentType switch
-        {
-            "image/jpeg" => ".jpg",
-            "image/png" => ".png",
-            "image/webp" => ".webp",
-            _ => string.Empty
-        };
-
-        if (string.IsNullOrEmpty(extension))
-            return BadRequest(new { error = "Only jpeg, png, and webp images are allowed." });
-
-        var photoId = Guid.NewGuid();
-        var objectKey = $"users/{userId}/galleries/{galleryId}/photos/{photoId}{extension}";
-
-        await using var stream = file.OpenReadStream();
-        await _s3.PutObjectAsync(new PutObjectRequest
-        {
-            BucketName = _s3Options.BucketName,
-            Key = objectKey,
-            InputStream = stream,
-            ContentType = contentType
-        }, HttpContext.RequestAborted);
-
-        return await AddPhotoToGallery(galleryId, new AddPhotoToGalleryRequest
-        {
-            PhotoId = photoId,
-            ObjectKey = objectKey,
-            InsertAtStart = insertAtStart,
-            InsertAfterPhotoId = insertAfterPhotoId
-        });
-    }
-
     // [x] Add photo to database (auth required)
     [Authorize]
     [HttpPost("{galleryId:guid}/photos")]
