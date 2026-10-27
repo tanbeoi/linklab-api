@@ -102,6 +102,58 @@ public class GalleriesController : ControllerBase
         _s3Options = s3Options.Value;
     }
 
+    private string CreateReadUrl(string objectKey, DateTime expiresAtUtc)
+        => _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.GET,
+            Expires = expiresAtUtc
+        });
+
+    private async Task<string?> GetThumbnailObjectKeyAsync(Gallery gallery)
+    {
+        if (!string.IsNullOrWhiteSpace(gallery.ThumbnailObjectKey))
+            return gallery.ThumbnailObjectKey;
+
+        var photos = _db.Photos.AsNoTracking().Where(photo => photo.GalleryId == gallery.Id);
+
+        if (gallery.ThumbnailPhotoId.HasValue)
+        {
+            var selectedPhotoKey = await photos
+                .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value)
+                .Select(photo => photo.ObjectKey)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(selectedPhotoKey))
+                return selectedPhotoKey;
+        }
+
+        return await photos
+            .OrderBy(photo => photo.SortOrder)
+            .ThenBy(photo => photo.CreatedAtUtc)
+            .ThenBy(photo => photo.Id)
+            .Select(photo => photo.ObjectKey)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<GalleryThumbnailResponse> CreateThumbnailResponseAsync(Gallery gallery)
+    {
+        var objectKey = await GetThumbnailObjectKeyAsync(gallery);
+
+        return new GalleryThumbnailResponse
+        {
+            ThumbnailPhotoId = gallery.ThumbnailPhotoId,
+            HasCustomThumbnail = !string.IsNullOrWhiteSpace(gallery.ThumbnailObjectKey),
+            PreviewImageUrl = string.IsNullOrWhiteSpace(objectKey)
+                ? null
+                : CreateReadUrl(objectKey, DateTime.UtcNow.AddMinutes(30)),
+            ThumbnailFocalPointX = gallery.ThumbnailFocalPointX,
+            ThumbnailFocalPointY = gallery.ThumbnailFocalPointY,
+            ThumbnailZoom = gallery.ThumbnailZoom
+        };
+    }
+
     private async Task AddPreviewImagesAsync(IReadOnlyList<GalleryResponse> galleries)
     {
         if (galleries.Count == 0)
@@ -109,15 +161,22 @@ public class GalleriesController : ControllerBase
 
         var galleryIds = galleries.Select(gallery => gallery.Id).ToList();
 
-        // Fetch the first image for every displayed gallery in one database query.
-        // This avoids one photo request per gallery on the public gallery page.
-        var firstPhotos = await _db.Galleries
+        // A custom thumbnail wins, then an explicitly selected gallery photo, then
+        // the gallery's first photo. Fetch every source in one query for card lists.
+        var previewSources = await _db.Galleries
             .AsNoTracking()
             .Where(gallery => galleryIds.Contains(gallery.Id))
             .Select(gallery => new
             {
                 gallery.Id,
-                ObjectKey = gallery.Photos
+                gallery.ThumbnailObjectKey,
+                SelectedPhotoObjectKey = gallery.ThumbnailPhotoId.HasValue
+                    ? gallery.Photos
+                        .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value)
+                        .Select(photo => photo.ObjectKey)
+                        .FirstOrDefault()
+                    : null,
+                FirstPhotoObjectKey = gallery.Photos
                     .OrderBy(photo => photo.SortOrder)
                     .ThenBy(photo => photo.CreatedAtUtc)
                     .ThenBy(photo => photo.Id)
@@ -126,9 +185,14 @@ public class GalleriesController : ControllerBase
             })
             .ToListAsync();
 
-        var objectKeysByGalleryId = firstPhotos
-            .Where(photo => !string.IsNullOrWhiteSpace(photo.ObjectKey))
-            .ToDictionary(photo => photo.Id, photo => photo.ObjectKey);
+        var objectKeysByGalleryId = previewSources
+            .Select(source => new
+            {
+                source.Id,
+                ObjectKey = source.ThumbnailObjectKey ?? source.SelectedPhotoObjectKey ?? source.FirstPhotoObjectKey
+            })
+            .Where(source => !string.IsNullOrWhiteSpace(source.ObjectKey))
+            .ToDictionary(source => source.Id, source => source.ObjectKey!);
 
         var expiresAtUtc = DateTime.UtcNow.AddMinutes(30);
 
@@ -137,13 +201,7 @@ public class GalleriesController : ControllerBase
             if (!objectKeysByGalleryId.TryGetValue(gallery.Id, out var objectKey))
                 continue;
 
-            gallery.PreviewImageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
-            {
-                BucketName = _s3Options.BucketName,
-                Key = objectKey,
-                Verb = HttpVerb.GET,
-                Expires = expiresAtUtc
-            });
+            gallery.PreviewImageUrl = CreateReadUrl(objectKey, expiresAtUtc);
         }
     }
 
@@ -229,7 +287,12 @@ public class GalleriesController : ControllerBase
             SortOrder = gallery.SortOrder,
             CreatedAtUtc = gallery.CreatedAtUtc,
             PublishedAtUtc = gallery.PublishedAtUtc,
-            PhotoCount = 0
+            PhotoCount = 0,
+            ThumbnailPhotoId = gallery.ThumbnailPhotoId,
+            HasCustomThumbnail = !string.IsNullOrWhiteSpace(gallery.ThumbnailObjectKey),
+            ThumbnailFocalPointX = gallery.ThumbnailFocalPointX,
+            ThumbnailFocalPointY = gallery.ThumbnailFocalPointY,
+            ThumbnailZoom = gallery.ThumbnailZoom
         };
 
         // Return 201 Created,
@@ -266,7 +329,12 @@ public class GalleriesController : ControllerBase
                 CreatedAtUtc = g.CreatedAtUtc,
                 PublishedAtUtc = g.PublishedAtUtc,
                 PhotoCount = g.Photos.Count,
-                OwnerDisplayName = g.Owner.DisplayName
+                OwnerDisplayName = g.Owner.DisplayName,
+                ThumbnailPhotoId = g.ThumbnailPhotoId,
+                HasCustomThumbnail = g.ThumbnailObjectKey != null,
+                ThumbnailFocalPointX = g.ThumbnailFocalPointX,
+                ThumbnailFocalPointY = g.ThumbnailFocalPointY,
+                ThumbnailZoom = g.ThumbnailZoom
             })
             .ToListAsync();
 
@@ -303,7 +371,12 @@ public class GalleriesController : ControllerBase
                 CreatedAtUtc = g.CreatedAtUtc,
                 PublishedAtUtc = g.PublishedAtUtc,
                 PhotoCount = g.Photos.Count,
-                OwnerDisplayName = g.Owner.DisplayName
+                OwnerDisplayName = g.Owner.DisplayName,
+                ThumbnailPhotoId = g.ThumbnailPhotoId,
+                HasCustomThumbnail = g.ThumbnailObjectKey != null,
+                ThumbnailFocalPointX = g.ThumbnailFocalPointX,
+                ThumbnailFocalPointY = g.ThumbnailFocalPointY,
+                ThumbnailZoom = g.ThumbnailZoom
             })
             .FirstOrDefaultAsync();
 
@@ -431,7 +504,12 @@ public class GalleriesController : ControllerBase
                 CreatedAtUtc = g.CreatedAtUtc,
                 PublishedAtUtc = g.PublishedAtUtc,
                 PhotoCount = g.Photos.Count,
-                OwnerDisplayName = g.Owner.DisplayName
+                OwnerDisplayName = g.Owner.DisplayName,
+                ThumbnailPhotoId = g.ThumbnailPhotoId,
+                HasCustomThumbnail = g.ThumbnailObjectKey != null,
+                ThumbnailFocalPointX = g.ThumbnailFocalPointX,
+                ThumbnailFocalPointY = g.ThumbnailFocalPointY,
+                ThumbnailZoom = g.ThumbnailZoom
             })
             .ToListAsync();
 
@@ -674,6 +752,14 @@ public class GalleriesController : ControllerBase
         if (photo is null)
             return NotFound(new { error = "Photo not found." });
 
+        if (photo.Gallery.ThumbnailPhotoId == photo.Id)
+        {
+            photo.Gallery.ThumbnailPhotoId = null;
+            photo.Gallery.ThumbnailFocalPointX = 50;
+            photo.Gallery.ThumbnailFocalPointY = 50;
+            photo.Gallery.ThumbnailZoom = 1;
+        }
+
         await _s3.DeleteObjectAsync(new DeleteObjectRequest
         {
             BucketName = _s3Options.BucketName,
@@ -751,6 +837,169 @@ public class GalleriesController : ControllerBase
         };
 
         return Ok(res);
+    }
+
+    // Create a signed S3 upload URL for an optional, gallery-card-only thumbnail.
+    // Unlike regular photos, this image is not added to the gallery's photo list.
+    [Authorize]
+    [HttpPost("{galleryId:guid}/thumbnail/upload-url")]
+    public async Task<IActionResult> CreateThumbnailUploadUrl(
+        Guid galleryId,
+        CreatePhotoUploadUrlRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userIdText) || !Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var ownsGallery = await _db.Galleries
+            .AsNoTracking()
+            .AnyAsync(gallery => gallery.Id == galleryId && gallery.OwnerId == userId);
+
+        if (!ownsGallery)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        var contentType = (req.ContentType ?? string.Empty).Trim().ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrEmpty(extension))
+            return BadRequest(new { error = "Only jpeg, png, and webp images are allowed." });
+
+        var objectKey = $"users/{userId}/galleries/{galleryId}/thumbnails/{Guid.NewGuid()}{extension}";
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(10);
+        var uploadUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.PUT,
+            Expires = expiresAtUtc,
+            ContentType = contentType
+        });
+
+        return Ok(new CreateGalleryThumbnailUploadUrlResponse
+        {
+            ObjectKey = objectKey,
+            UploadUrl = uploadUrl,
+            PreviewImageUrl = CreateReadUrl(objectKey, expiresAtUtc),
+            ExpiresAtUtc = expiresAtUtc
+        });
+    }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/thumbnail")]
+    public async Task<IActionResult> UpdateThumbnailSource(
+        Guid galleryId,
+        UpdateGalleryThumbnailSourceRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userIdText) || !Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var suppliedObjectKey = (req.ObjectKey ?? string.Empty).Trim();
+        if (req.PhotoId.HasValue && !string.IsNullOrEmpty(suppliedObjectKey))
+            return BadRequest(new { error = "Choose either a gallery photo or an uploaded thumbnail." });
+
+        var gallery = await _db.Galleries
+            .FirstOrDefaultAsync(candidate => candidate.Id == galleryId && candidate.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        if (req.PhotoId.HasValue)
+        {
+            var photoBelongsToGallery = await _db.Photos
+                .AsNoTracking()
+                .AnyAsync(photo => photo.Id == req.PhotoId.Value && photo.GalleryId == galleryId);
+
+            if (!photoBelongsToGallery)
+                return BadRequest(new { error = "The selected photo does not belong to this gallery." });
+        }
+
+        if (!string.IsNullOrEmpty(suppliedObjectKey))
+        {
+            var expectedPrefix = $"users/{userId}/galleries/{galleryId}/thumbnails/";
+            if (!suppliedObjectKey.StartsWith(expectedPrefix, StringComparison.Ordinal))
+                return BadRequest(new { error = "The thumbnail image does not belong to this gallery." });
+
+            try
+            {
+                var metadata = await _s3.GetObjectMetadataAsync(new GetObjectMetadataRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = suppliedObjectKey
+                }, HttpContext.RequestAborted);
+
+                if (metadata.ContentLength == 0)
+                    return BadRequest(new { error = "The uploaded thumbnail is empty." });
+            }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                return BadRequest(new { error = "The thumbnail has not been uploaded to S3." });
+            }
+        }
+
+        var previousCustomObjectKey = gallery.ThumbnailObjectKey;
+        gallery.ThumbnailPhotoId = req.PhotoId;
+        gallery.ThumbnailObjectKey = string.IsNullOrEmpty(suppliedObjectKey) ? null : suppliedObjectKey;
+        gallery.ThumbnailFocalPointX = 50;
+        gallery.ThumbnailFocalPointY = 50;
+        gallery.ThumbnailZoom = 1;
+        await _db.SaveChangesAsync();
+
+        if (!string.IsNullOrEmpty(previousCustomObjectKey) &&
+            !string.Equals(previousCustomObjectKey, gallery.ThumbnailObjectKey, StringComparison.Ordinal))
+        {
+            try
+            {
+                await _s3.DeleteObjectAsync(new DeleteObjectRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = previousCustomObjectKey
+                }, HttpContext.RequestAborted);
+            }
+            catch (AmazonS3Exception)
+            {
+                // The gallery now uses its new source. A failed cleanup must not
+                // make the update appear to fail to the gallery owner.
+            }
+        }
+
+        return Ok(await CreateThumbnailResponseAsync(gallery));
+    }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/thumbnail/frame")]
+    public async Task<IActionResult> UpdateThumbnailFrame(
+        Guid galleryId,
+        UpdateGalleryThumbnailFrameRequest req)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrWhiteSpace(userIdText) || !Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        if (!double.IsFinite(req.FocalPointX) || !double.IsFinite(req.FocalPointY) || !double.IsFinite(req.Zoom) ||
+            req.FocalPointX is < 0 or > 100 || req.FocalPointY is < 0 or > 100 || req.Zoom is < 1 or > 3)
+        {
+            return BadRequest(new { error = "Thumbnail framing must use a focal point between 0 and 100 and zoom between 1 and 3." });
+        }
+
+        var gallery = await _db.Galleries
+            .FirstOrDefaultAsync(candidate => candidate.Id == galleryId && candidate.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found or does not belong to the current user." });
+
+        gallery.ThumbnailFocalPointX = req.FocalPointX;
+        gallery.ThumbnailFocalPointY = req.FocalPointY;
+        gallery.ThumbnailZoom = req.Zoom;
+        await _db.SaveChangesAsync();
+
+        return Ok(await CreateThumbnailResponseAsync(gallery));
     }
 
     // Upload a photo through the API. This avoids requiring browser CORS access to S3.

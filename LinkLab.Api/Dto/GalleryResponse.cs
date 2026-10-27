@@ -17,4 +17,9 @@ public class GalleryResponse
     public int PhotoCount { get; set; }
     public string OwnerDisplayName { get; set; } = string.Empty;
     public string? PreviewImageUrl { get; set; }
+    public Guid? ThumbnailPhotoId { get; set; }
+    public bool HasCustomThumbnail { get; set; }
+    public double ThumbnailFocalPointX { get; set; } = 50;
+    public double ThumbnailFocalPointY { get; set; } = 50;
+    public double ThumbnailZoom { get; set; } = 1;
 }

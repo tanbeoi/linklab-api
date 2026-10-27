@@ -20,6 +20,14 @@ public class AppDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique();
 
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.Property(user => user.AvatarObjectKey).HasMaxLength(1000);
+            entity.Property(user => user.AvatarFocalPointX).HasDefaultValue(50d);
+            entity.Property(user => user.AvatarFocalPointY).HasDefaultValue(50d);
+            entity.Property(user => user.AvatarZoom).HasDefaultValue(1d);
+        });
+
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<CollabPost>(e =>
@@ -83,6 +91,15 @@ public class AppDbContext : DbContext
             entity.Property(g => g.IsPublished)
                 .IsRequired()
                 .HasDefaultValue(false);
+
+            entity.Property(g => g.ThumbnailFocalPointX)
+                .HasDefaultValue(50d);
+
+            entity.Property(g => g.ThumbnailFocalPointY)
+                .HasDefaultValue(50d);
+
+            entity.Property(g => g.ThumbnailZoom)
+                .HasDefaultValue(1d);
 
             entity.HasIndex(g => new { g.OwnerId, g.SortOrder });
 

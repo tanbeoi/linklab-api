@@ -95,13 +95,24 @@ public PostsController(
                 PostId = g.CollabPostId!.Value,
                 g.Id,
                 g.Title,
+                g.OwnerId,
                 OwnerDisplayName = g.Owner.DisplayName,
                 PhotoCount = g.Photos.Count,
-                PreviewObjectKey = g.Photos
-                    .OrderBy(p => p.SortOrder)
-                    .ThenBy(p => p.Id)
-                    .Select(p => p.ObjectKey)
-                    .FirstOrDefault()
+                g.ThumbnailFocalPointX,
+                g.ThumbnailFocalPointY,
+                g.ThumbnailZoom,
+                PreviewObjectKey = g.ThumbnailObjectKey ??
+                    (g.ThumbnailPhotoId.HasValue
+                        ? g.Photos
+                            .Where(p => p.Id == g.ThumbnailPhotoId.Value)
+                            .Select(p => p.ObjectKey)
+                            .FirstOrDefault()
+                        : null) ??
+                    g.Photos
+                        .OrderBy(p => p.SortOrder)
+                        .ThenBy(p => p.Id)
+                        .Select(p => p.ObjectKey)
+                        .FirstOrDefault()
             })
             .ToListAsync();
 
@@ -128,6 +139,7 @@ public PostsController(
                 ? linkedPortfolios.Select(portfolio => new PortfolioGalleryPreview(
                     portfolio.Id,
                     portfolio.Title,
+                    portfolio.OwnerId,
                     portfolio.OwnerDisplayName,
                     string.IsNullOrEmpty(portfolio.PreviewObjectKey)
                         ? null
@@ -138,7 +150,10 @@ public PostsController(
                             Verb = HttpVerb.GET,
                             Expires = expiresAtUtc
                         }),
-                    portfolio.PhotoCount
+                    portfolio.PhotoCount,
+                    portfolio.ThumbnailFocalPointX,
+                    portfolio.ThumbnailFocalPointY,
+                    portfolio.ThumbnailZoom
                 )).ToList()
                 : new List<PortfolioGalleryPreview>();
             

@@ -1,7 +1,11 @@
 using LinkLab.Api.Data;
 using LinkLab.Api.Dto;
+using LinkLab.Api.Options;
+using Amazon.S3;
+using Amazon.S3.Model;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace LinkLab.Api.Controllers;
 
@@ -10,10 +14,27 @@ namespace LinkLab.Api.Controllers;
 public class ProfilesController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IAmazonS3 _s3;
+    private readonly S3Options _s3Options;
 
-    public ProfilesController(AppDbContext db)
+    public ProfilesController(AppDbContext db, IAmazonS3 s3, IOptions<S3Options> s3Options)
     {
         _db = db;
+        _s3 = s3;
+        _s3Options = s3Options.Value;
+    }
+
+    private string? CreateAvatarReadUrl(string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(objectKey)) return null;
+
+        return _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.GET,
+            Expires = DateTime.UtcNow.AddHours(12)
+        });
     }
 
     // Public profiles expose only a creator's display name and identifier.
@@ -24,9 +45,25 @@ public class ProfilesController : ControllerBase
         var profile = await _db.Users
             .AsNoTracking()
             .Where(user => user.Id == userId)
-            .Select(user => new PublicProfileResponse(user.Id, user.DisplayName))
+            .Select(user => new
+            {
+                user.Id,
+                user.DisplayName,
+                user.AvatarObjectKey,
+                user.AvatarFocalPointX,
+                user.AvatarFocalPointY,
+                user.AvatarZoom
+            })
             .FirstOrDefaultAsync();
 
-        return profile is null ? NotFound(new { error = "Profile not found." }) : Ok(profile);
+        return profile is null
+            ? NotFound(new { error = "Profile not found." })
+            : Ok(new PublicProfileResponse(
+                profile.Id,
+                profile.DisplayName,
+                CreateAvatarReadUrl(profile.AvatarObjectKey),
+                profile.AvatarFocalPointX,
+                profile.AvatarFocalPointY,
+                profile.AvatarZoom));
     }
 }

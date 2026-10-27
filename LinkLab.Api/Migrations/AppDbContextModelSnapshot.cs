@@ -134,6 +134,27 @@ namespace LinkLab.Api.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
+                    b.Property<double>("ThumbnailFocalPointX")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<double>("ThumbnailFocalPointY")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<string>("ThumbnailObjectKey")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ThumbnailPhotoId")
+                        .HasColumnType("uuid");
+
+                    b.Property<double>("ThumbnailZoom")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(1.0);
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
@@ -206,6 +227,25 @@ namespace LinkLab.Api.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<double>("AvatarFocalPointX")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<double>("AvatarFocalPointY")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<string>("AvatarObjectKey")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<double>("AvatarZoom")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(1.0);
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
