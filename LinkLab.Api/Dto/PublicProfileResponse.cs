@@ -7,5 +7,9 @@ public record PublicProfileResponse(
     string? AvatarImageUrl,
     double AvatarFocalPointX,
     double AvatarFocalPointY,
-    double AvatarZoom
+    double AvatarZoom,
+    string? CoverImageUrl,
+    double CoverFocalPointX,
+    double CoverFocalPointY,
+    double CoverZoom
 );

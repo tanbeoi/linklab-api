@@ -247,6 +247,25 @@ namespace LinkLab.Api.Migrations
                         .HasColumnType("double precision")
                         .HasDefaultValue(1.0);
 
+                    b.Property<double>("CoverFocalPointX")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<double>("CoverFocalPointY")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(50.0);
+
+                    b.Property<string>("CoverObjectKey")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<double>("CoverZoom")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(1.0);
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 

@@ -51,6 +51,8 @@ public class AuthController : ControllerBase
         });
     }
 
+    private string? CreateCoverReadUrl(string? objectKey) => CreateAvatarReadUrl(objectKey);
+
     private AuthUserResponse CreateUserResponse(User user) => new(
         user.Id,
         user.Email,
@@ -58,7 +60,11 @@ public class AuthController : ControllerBase
         CreateAvatarReadUrl(user.AvatarObjectKey),
         user.AvatarFocalPointX,
         user.AvatarFocalPointY,
-        user.AvatarZoom);
+        user.AvatarZoom,
+        CreateCoverReadUrl(user.CoverObjectKey),
+        user.CoverFocalPointX,
+        user.CoverFocalPointY,
+        user.CoverZoom);
 
     private Guid? GetCurrentUserId()
     {
@@ -234,6 +240,110 @@ public class AuthController : ControllerBase
             {
                 // The account now points at its new avatar, so failed cleanup
                 // must not make an otherwise successful update appear to fail.
+            }
+        }
+
+        return Ok(CreateUserResponse(user));
+    }
+
+    [Authorize]
+    [HttpPost("cover/upload-url")]
+    public IActionResult CreateCoverUploadUrl(CreatePhotoUploadUrlRequest req)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized(new { error = "Invalid token user." });
+
+        var contentType = (req.ContentType ?? string.Empty).Trim().ToLowerInvariant();
+        var extension = contentType switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrEmpty(extension))
+            return BadRequest(new { error = "Only jpeg, png, and webp images are allowed." });
+
+        var objectKey = $"users/{userId.Value}/cover/{Guid.NewGuid()}{extension}";
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(10);
+        var uploadUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+        {
+            BucketName = _s3Options.BucketName,
+            Key = objectKey,
+            Verb = HttpVerb.PUT,
+            Expires = expiresAtUtc,
+            ContentType = contentType
+        });
+
+        return Ok(new CoverUploadUrlResponse(objectKey, uploadUrl, CreateCoverReadUrl(objectKey)!, expiresAtUtc));
+    }
+
+    [Authorize]
+    [HttpPatch("cover")]
+    public async Task<IActionResult> UpdateCover(UpdateCoverRequest req)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized(new { error = "Invalid token user." });
+
+        if (!double.IsFinite(req.FocalPointX) || !double.IsFinite(req.FocalPointY) || !double.IsFinite(req.Zoom) ||
+            req.FocalPointX is < 0 or > 100 || req.FocalPointY is < 0 or > 100 || req.Zoom is < 1 or > 3)
+        {
+            return BadRequest(new { error = "Cover framing must use a focal point between 0 and 100 and zoom between 1 and 3." });
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(candidate => candidate.Id == userId.Value);
+        if (user is null) return Unauthorized(new { error = "User not found." });
+
+        var suppliedObjectKey = (req.ObjectKey ?? string.Empty).Trim();
+        var coverObjectKey = string.IsNullOrEmpty(suppliedObjectKey) ? user.CoverObjectKey : suppliedObjectKey;
+        if (string.IsNullOrWhiteSpace(coverObjectKey))
+            return BadRequest(new { error = "Upload an image before saving a cover photo." });
+
+        if (!string.IsNullOrEmpty(suppliedObjectKey))
+        {
+            var expectedPrefix = $"users/{userId.Value}/cover/";
+            if (!suppliedObjectKey.StartsWith(expectedPrefix, StringComparison.Ordinal))
+                return BadRequest(new { error = "The cover image does not belong to the current user." });
+
+            try
+            {
+                var metadata = await _s3.GetObjectMetadataAsync(new GetObjectMetadataRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = suppliedObjectKey
+                }, HttpContext.RequestAborted);
+
+                if (metadata.ContentLength == 0)
+                    return BadRequest(new { error = "The uploaded cover image is empty." });
+            }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                return BadRequest(new { error = "The cover image has not been uploaded to S3." });
+            }
+        }
+
+        var previousObjectKey = user.CoverObjectKey;
+        user.CoverObjectKey = coverObjectKey;
+        user.CoverFocalPointX = req.FocalPointX;
+        user.CoverFocalPointY = req.FocalPointY;
+        user.CoverZoom = req.Zoom;
+        await _db.SaveChangesAsync();
+
+        if (!string.IsNullOrWhiteSpace(previousObjectKey) &&
+            !string.Equals(previousObjectKey, coverObjectKey, StringComparison.Ordinal))
+        {
+            try
+            {
+                await _s3.DeleteObjectAsync(new DeleteObjectRequest
+                {
+                    BucketName = _s3Options.BucketName,
+                    Key = previousObjectKey
+                }, HttpContext.RequestAborted);
+            }
+            catch (AmazonS3Exception)
+            {
+                // Storage cleanup should never undo an otherwise valid update.
             }
         }
 

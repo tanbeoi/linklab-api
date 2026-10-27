@@ -26,6 +26,10 @@ public class AppDbContext : DbContext
             entity.Property(user => user.AvatarFocalPointX).HasDefaultValue(50d);
             entity.Property(user => user.AvatarFocalPointY).HasDefaultValue(50d);
             entity.Property(user => user.AvatarZoom).HasDefaultValue(1d);
+            entity.Property(user => user.CoverObjectKey).HasMaxLength(1000);
+            entity.Property(user => user.CoverFocalPointX).HasDefaultValue(50d);
+            entity.Property(user => user.CoverFocalPointY).HasDefaultValue(50d);
+            entity.Property(user => user.CoverZoom).HasDefaultValue(1d);
         });
 
         base.OnModelCreating(modelBuilder);

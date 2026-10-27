@@ -12,5 +12,10 @@ public class User
     public double AvatarFocalPointX { get; set; } = 50;
     public double AvatarFocalPointY { get; set; } = 50;
     public double AvatarZoom { get; set; } = 1;
+    // Cover images use the same non-destructive framing model as avatars.
+    public string? CoverObjectKey { get; set; }
+    public double CoverFocalPointX { get; set; } = 50;
+    public double CoverFocalPointY { get; set; } = 50;
+    public double CoverZoom { get; set; } = 1;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }

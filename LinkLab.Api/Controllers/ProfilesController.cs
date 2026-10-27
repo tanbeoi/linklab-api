@@ -37,6 +37,8 @@ public class ProfilesController : ControllerBase
         });
     }
 
+    private string? CreateCoverReadUrl(string? objectKey) => CreateAvatarReadUrl(objectKey);
+
     // Public profiles expose only a creator's display name and identifier.
     // Their visible work is loaded from the existing public post/gallery APIs.
     [HttpGet("{userId:guid}")]
@@ -52,7 +54,11 @@ public class ProfilesController : ControllerBase
                 user.AvatarObjectKey,
                 user.AvatarFocalPointX,
                 user.AvatarFocalPointY,
-                user.AvatarZoom
+                user.AvatarZoom,
+                user.CoverObjectKey,
+                user.CoverFocalPointX,
+                user.CoverFocalPointY,
+                user.CoverZoom
             })
             .FirstOrDefaultAsync();
 
@@ -64,6 +70,10 @@ public class ProfilesController : ControllerBase
                 CreateAvatarReadUrl(profile.AvatarObjectKey),
                 profile.AvatarFocalPointX,
                 profile.AvatarFocalPointY,
-                profile.AvatarZoom));
+                profile.AvatarZoom,
+                CreateCoverReadUrl(profile.CoverObjectKey),
+                profile.CoverFocalPointX,
+                profile.CoverFocalPointY,
+                profile.CoverZoom));
     }
 }
