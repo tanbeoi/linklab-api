@@ -213,6 +213,7 @@ public PostsController(
             post.Description,
             post.Location,
             post.IsRemote,
+            post.IsClosed,
             post.CreatedAtUtc,
             post.UserId,
             user.DisplayName,
@@ -268,6 +269,27 @@ public PostsController(
             post.Location,
             post.IsRemote
         });
+    }
+
+    // Owners can close or reopen a post without unpublishing its completed workflow.
+    [Authorize]
+    [HttpPatch("{id:guid}/closed")]
+    public async Task<IActionResult> UpdateClosure(Guid id, UpdatePostClosureRequest req)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var post = await _db.CollabPosts
+            .FirstOrDefaultAsync(post => post.Id == id && post.UserId == userId.Value);
+
+        if (post is null)
+            return NotFound(new { error = "Post not found." });
+
+        post.IsClosed = req.IsClosed;
+        await _db.SaveChangesAsync();
+
+        return Ok(new { post.Id, post.IsClosed });
     }
 
     // [x] List posts (public)
@@ -343,6 +365,7 @@ public PostsController(
                 p.Description,
                 p.Location,
                 p.IsRemote,
+                p.IsClosed,
                 p.CreatedAtUtc,
                 p.UserId,
                 p.User.DisplayName,
@@ -434,6 +457,7 @@ public PostsController(
                 p.Description,
                 p.Location,
                 p.IsRemote,
+                p.IsClosed,
                 p.CreatedAtUtc,
                 p.UserId,
                 p.User != null ? p.User.DisplayName : "",
@@ -487,6 +511,9 @@ public PostsController(
             .FirstOrDefaultAsync(p => p.Id == postId);
 
         if (post is null) return NotFound(new { error = "Post not found." });
+
+        if (post.IsClosed)
+            return Conflict(new { error = "This collaboration is closed and is no longer accepting applications." });
 
         // Optional: prevent applying to own post
         if (post.UserId == userId) return BadRequest(new { error = "You cannot apply to your own post." });

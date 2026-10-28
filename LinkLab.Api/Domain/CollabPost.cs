@@ -16,6 +16,7 @@ public class CollabPost
     // Optional filters (keep v1 simple)
     public string Location { get; set; } = string.Empty; // e.g. "Melbourne" / "Remote"
     public bool IsRemote { get; set; }
+    public bool IsClosed { get; set; }
 
     // Timestamps
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

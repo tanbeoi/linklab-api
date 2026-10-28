@@ -6,6 +6,7 @@ public record CollabPostResponse(
     string Description,
     string Location,
     bool IsRemote,
+    bool IsClosed,
     DateTime CreatedAtUtc,
     Guid UserId,
     string OwnerDisplayName,

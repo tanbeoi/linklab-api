@@ -39,6 +39,7 @@ public class AppDbContext : DbContext
             e.Property(p => p.Title).HasMaxLength(100).IsRequired();
             e.Property(p => p.Description).HasMaxLength(2000).IsRequired();
             e.Property(p => p.Location).HasMaxLength(100);
+            e.Property(p => p.IsClosed).HasDefaultValue(false);
 
             e.HasOne(p => p.User)
             .WithMany()
