@@ -454,7 +454,8 @@ public class GalleriesController : ControllerBase
     public async Task<ActionResult>List(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] Guid? ownerId = null)
+        [FromQuery] Guid? ownerId = null,
+        [FromQuery] GalleryPurpose? purpose = null)
     {
         // 1. Validate pagination values
         if (page < 1)
@@ -473,10 +474,20 @@ public class GalleriesController : ControllerBase
             });
         }
 
+        if (purpose.HasValue && !Enum.IsDefined(purpose.Value))
+        {
+            return BadRequest(new
+            {
+                error = "Invalid gallery purpose."
+            });
+        }
+
         // 2. Build the base query for all public galleries
         var query = _db.Galleries
             .AsNoTracking()
-            .Where(g => g.IsPublished && (!ownerId.HasValue || g.OwnerId == ownerId.Value));
+            .Where(g => g.IsPublished &&
+                (!ownerId.HasValue || g.OwnerId == ownerId.Value) &&
+                (!purpose.HasValue || g.Purpose == purpose.Value));
 
         // 3. Count all matching posts
         var totalCount = await query.CountAsync();
