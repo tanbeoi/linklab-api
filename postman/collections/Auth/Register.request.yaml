@@ -1,5 +1,4 @@
 $kind: http-request
-name: Register
 url: "{{baseUrl}}/api/auth/register"
 method: POST
 headers:
@@ -8,8 +7,8 @@ body:
   type: json
   content: |-
     {
-      "email": "test3@gmail.com",
-      "password": "test3",
-      "displayName": "test3"
+      "email": "testuser123@example.com",
+      "password": "TestPassword123!",
+      "displayName": "Test User"
     }
 order: 1784620108921

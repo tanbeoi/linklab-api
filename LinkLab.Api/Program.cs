@@ -151,12 +151,24 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+var frontendUrl = builder.Configuration["FrontendUrl"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
     {
+        var origins = new List<string>
+        {
+            "http://localhost:3000"
+        };
+
+        if (!string.IsNullOrWhiteSpace(frontendUrl))
+        {
+            origins.Add(frontendUrl);
+        }
+
         policy
-            .WithOrigins("http://localhost:3000")
+            .WithOrigins(origins.ToArray())
             .AllowAnyHeader()
             .AllowAnyMethod();
     });

@@ -1,13 +1,13 @@
 $kind: http-request
-url: "{{baseUrl}}/api/galleries/01a0ac5b-6beb-7eb9-a7ac-517e092f55a3/photos/upload-url"
+url: "{{baseUrl}}/api/galleries/01a0db49-66c8-7e24-9cb2-c9eced8df8d1/photos/upload-url"
 method: POST
 body:
   type: json
   content: |-
     {
-      "fileName": "lookback1.png",
-      "contentType": "image/png",
-      "caption": "Look Back screenshot"
+      "fileName": "cowboyBebop.jpg",
+      "contentType": "image/jpeg",
+      "caption": "See you Space Cowboy"
     }
 auth:
   type: bearer

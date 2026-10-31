@@ -1,13 +1,12 @@
 $kind: http-request
-name: Save Image to Database
-url: "{{baseUrl}}/api/galleries/019f033a-b822-7ca8-8905-d3636bac59a3/photos"
+url: "{{baseUrl}}/api/galleries/01a0db49-66c8-7e24-9cb2-c9eced8df8d1/photos"
 method: POST
 body:
   type: json
   content: |-
     {
-      "photoId": "ecf23091-c411-4368-b2ed-eed0a0c071d9",
-      "objectKey": "users/c0a87d48-ecd4-414d-87c0-997dca5a3dbd/galleries/019f033a-b822-7ca8-8905-d3636bac59a3/photos/ecf23091-c411-4368-b2ed-eed0a0c071d9.png",
+      "photoId": "61305208-b9cb-4c4d-9646-394b6ab6ab35",
+      "objectKey": "users/d9de7160-4b49-4342-b927-b04487807e21/galleries/01a0db49-66c8-7e24-9cb2-c9eced8df8d1/photos/61305208-b9cb-4c4d-9646-394b6ab6ab35.jpg",
       "caption": "Look Back screenshot"
     }
 auth:
