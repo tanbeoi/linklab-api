@@ -306,6 +306,28 @@ public PostsController(
         return Ok(new { post.Id, post.IsClosed });
     }
 
+    // Permanently remove a collaboration post the current user owns. Applications
+    // cascade from the post; linked galleries are retained and automatically
+    // unlinked by the gallery foreign-key relationship.
+    [Authorize]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var post = await _db.CollabPosts
+            .FirstOrDefaultAsync(candidate => candidate.Id == id && candidate.UserId == userId.Value);
+
+        if (post is null)
+            return NotFound(new { error = "Post not found." });
+
+        _db.CollabPosts.Remove(post);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // [x] List posts (public)
     [HttpGet]
     [ProducesResponseType(
