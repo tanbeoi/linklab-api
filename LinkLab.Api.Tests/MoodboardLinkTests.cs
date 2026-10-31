@@ -159,6 +159,62 @@ public sealed class MoodboardLinkTests : IDisposable
         Assert.Null((await _db.Galleries.FindAsync(gallery.Id))!.CollabPostId);
     }
 
+    private const string Embed = "<iframe width=\"560\" height=\"315\" src=\"https://www.youtube.com/embed/M7lc1UVf-VE?si=test\" allowfullscreen></iframe>";
+
+    [Theory]
+    [InlineData("https://evil.example/embed/M7lc1UVf-VE")]
+    [InlineData("https://youtube.com.evil.example/embed/M7lc1UVf-VE")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("https://www.youtube.com/embed/invalid")]
+    [InlineData("<iframe src=\"https://evil.example/embed/M7lc1UVf-VE\"></iframe>")]
+    public void YoutubeEmbed_RejectsInvalidSources(string input)
+    {
+        Assert.False(YoutubeEmbed.TryParse(input, out _, out _));
+    }
+
+    [Fact]
+    public void YoutubeEmbed_ExtractsOnlyVideoIdAndDimensions()
+    {
+        Assert.True(YoutubeEmbed.TryParse(Embed, out var id, out var ratio));
+        Assert.Equal("M7lc1UVf-VE", id);
+        Assert.Equal(16d / 9, ratio);
+        Assert.True(YoutubeEmbed.TryParse("<iframe width='315' height='560' src='https://www.youtube-nocookie.com/embed/M7lc1UVf-VE'></iframe>", out _, out ratio));
+        Assert.Equal(315d / 560, ratio);
+    }
+
+    [Fact]
+    public async Task Videos_PreserveMixedOrder_AndBlockMoodboardConversionUntilRemoved()
+    {
+        var controller = Controller(_owner.Id);
+        var gallery = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(GalleryPurpose.Portfolio, _post.Id))).Value);
+        var image = new Photo { Id = Guid.NewGuid(), GalleryId = gallery.Id, ObjectKey = "image", SortOrder = 3 };
+        _db.Photos.Add(image);
+        await _db.SaveChangesAsync();
+        var video = Assert.IsType<PhotoResponse>(Assert.IsType<OkObjectResult>(await controller.AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed, InsertAfterPhotoId = image.Id })).Value);
+        var first = Assert.IsType<PhotoResponse>(Assert.IsType<OkObjectResult>(await controller.AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed, InsertAtStart = true })).Value);
+        var middle = Assert.IsType<PhotoResponse>(Assert.IsType<OkObjectResult>(await controller.AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed, InsertAfterPhotoId = image.Id })).Value);
+        Assert.Equal(new[] { first.Id, image.Id, middle.Id, video.Id },
+            await _db.Photos.Where(p => p.GalleryId == gallery.Id).OrderBy(p => p.SortOrder).Select(p => p.Id).ToArrayAsync());
+        Assert.Equal("M7lc1UVf-VE", video.YoutubeVideoId);
+        Assert.IsType<BadRequestObjectResult>(await controller.Update(gallery.Id, new()
+        { Title = "Moodboard", Purpose = GalleryPurpose.Moodboard }));
+        Assert.Equal(GalleryPurpose.Portfolio, (await _db.Galleries.FindAsync(gallery.Id))!.Purpose);
+        Assert.IsType<NotFoundObjectResult>(await Controller(Guid.NewGuid()).AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed }));
+        Assert.IsType<BadRequestObjectResult>(await controller.AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed, InsertAfterPhotoId = Guid.NewGuid() }));
+        foreach (var item in new[] { first, middle, video })
+            Assert.IsType<NoContentResult>(await controller.DeletePhoto(gallery.Id, item.Id));
+        Assert.IsType<OkObjectResult>(await controller.Update(gallery.Id, new()
+        { Title = "Moodboard", Purpose = GalleryPurpose.Moodboard }));
+        Assert.IsType<BadRequestObjectResult>(await controller.AddYoutubeVideo(
+            gallery.Id, new() { EmbedCode = Embed }));
+    }
+
     [Fact]
     public async Task Database_RejectsDuplicateMoodboards_WhenValidationIsBypassed()
     {
