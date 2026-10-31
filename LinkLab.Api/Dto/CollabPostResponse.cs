@@ -23,5 +23,10 @@ public record CollabPostResponse(
 
     // The authenticated viewer's current application status, when they have applied.
     // This lets post views show a meaningful outcome instead of only "Applied".
-    string? CurrentUserApplicationStatus
+    string? CurrentUserApplicationStatus,
+
+    // A post owner needs to know whether a moodboard is already linked even
+    // before it is published or has photos. Public viewers only receive this
+    // for published moodboards.
+    bool HasLinkedMoodboard = false
 );

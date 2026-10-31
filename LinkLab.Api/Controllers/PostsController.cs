@@ -79,6 +79,19 @@ public PostsController(
             })
             .ToListAsync();
 
+        // Do not reveal private moodboards to public viewers. Their owners do
+        // need this lightweight signal so the feed can guide the next step in
+        // their project without incorrectly prompting them to create another.
+        var linkedMoodboardPostIds = await _db.Galleries
+            .AsNoTracking()
+            .Where(g =>
+                g.CollabPostId.HasValue &&
+                postIds.Contains(g.CollabPostId.Value) &&
+                g.Purpose == GalleryPurpose.Moodboard &&
+                (g.IsPublished || postIdsOwnedByCurrentUser.Contains(g.CollabPostId.Value)))
+            .Select(g => g.CollabPostId!.Value)
+            .ToHashSetAsync();
+
         var moodboardsByPostId = moodboards.ToDictionary(m => m.PostId);
 
         var portfolios = await _db.Galleries
@@ -161,7 +174,8 @@ public PostsController(
             {
                 MoodboardPreviewImageUrls = imageUrls,
                 MoodboardPhotoCount = moodboard?.PhotoCount ?? 0,
-                PortfolioGalleries = portfolioGalleries
+                PortfolioGalleries = portfolioGalleries,
+                HasLinkedMoodboard = linkedMoodboardPostIds.Contains(post.Id)
             };
         }).ToList();
     }
