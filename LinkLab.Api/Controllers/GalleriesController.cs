@@ -116,12 +116,12 @@ public class GalleriesController : ControllerBase
         if (!string.IsNullOrWhiteSpace(gallery.ThumbnailObjectKey))
             return gallery.ThumbnailObjectKey;
 
-        var photos = _db.Photos.AsNoTracking().Where(photo => photo.GalleryId == gallery.Id);
+        var photos = _db.Photos.AsNoTracking().Where(photo => photo.GalleryId == gallery.Id && photo.YoutubeVideoId == null);
 
         if (gallery.ThumbnailPhotoId.HasValue)
         {
             var selectedPhotoKey = await photos
-                .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value)
+                .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value && photo.YoutubeVideoId == null)
                 .Select(photo => photo.ObjectKey)
                 .FirstOrDefaultAsync();
 
@@ -172,11 +172,12 @@ public class GalleriesController : ControllerBase
                 gallery.ThumbnailObjectKey,
                 SelectedPhotoObjectKey = gallery.ThumbnailPhotoId.HasValue
                     ? gallery.Photos
-                        .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value)
+                        .Where(photo => photo.Id == gallery.ThumbnailPhotoId.Value && photo.YoutubeVideoId == null)
                         .Select(photo => photo.ObjectKey)
                         .FirstOrDefault()
                     : null,
                 FirstPhotoObjectKey = gallery.Photos
+                    .Where(photo => photo.YoutubeVideoId == null)
                     .OrderBy(photo => photo.SortOrder)
                     .ThenBy(photo => photo.CreatedAtUtc)
                     .ThenBy(photo => photo.Id)
@@ -1026,7 +1027,7 @@ public class GalleriesController : ControllerBase
         {
             var photoBelongsToGallery = await _db.Photos
                 .AsNoTracking()
-                .AnyAsync(photo => photo.Id == req.PhotoId.Value && photo.GalleryId == galleryId);
+                .AnyAsync(photo => photo.Id == req.PhotoId.Value && photo.GalleryId == galleryId && photo.YoutubeVideoId == null);
 
             if (!photoBelongsToGallery)
                 return BadRequest(new { error = "The selected photo does not belong to this gallery." });
