@@ -117,11 +117,12 @@ public PostsController(
                 PreviewObjectKey = g.ThumbnailObjectKey ??
                     (g.ThumbnailPhotoId.HasValue
                         ? g.Photos
-                            .Where(p => p.Id == g.ThumbnailPhotoId.Value)
+                            .Where(p => p.Id == g.ThumbnailPhotoId.Value && p.YoutubeVideoId == null)
                             .Select(p => p.ObjectKey)
                             .FirstOrDefault()
                         : null) ??
                     g.Photos
+                        .Where(p => p.YoutubeVideoId == null)
                         .OrderBy(p => p.SortOrder)
                         .ThenBy(p => p.Id)
                         .Select(p => p.ObjectKey)
