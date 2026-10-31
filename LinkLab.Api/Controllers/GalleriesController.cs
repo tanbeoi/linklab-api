@@ -1304,15 +1304,17 @@ public class GalleriesController : ControllerBase
             });
         }
 
-        // 3. Check if the gallery has any photos
-        var hasPhotos = await _db.Photos
+        // 3. Photo records also store embedded YouTube portfolio items.
+        var hasMedia = await _db.Photos
             .AnyAsync(p => p.GalleryId == galleryId);
 
-        if (!hasPhotos)
+        if (!hasMedia)
         {
             return BadRequest(new
             {
-                error = "Add at least one photo before publishing."
+                error = gallery.Purpose == GalleryPurpose.Moodboard
+                    ? "Add at least one photo before publishing."
+                    : "Add at least one photo or embedded YouTube video before publishing."
             });
         }
 
