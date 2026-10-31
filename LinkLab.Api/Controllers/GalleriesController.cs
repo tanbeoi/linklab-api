@@ -1129,6 +1129,7 @@ public class GalleriesController : ControllerBase
             return Unauthorized(new { error = "Invalid token user." });
 
         // 2. Check if the gallery exists and belongs to the current user
+        await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var gallery = await _db.Galleries
             .AsNoTracking()
             .Where(g => g.Id == galleryId && g.OwnerId == userId)
@@ -1217,10 +1218,13 @@ public class GalleriesController : ControllerBase
                 insertIndex++;
             }
 
-            for (var index = insertIndex; index < photos.Count; index++)
-                photos[index].SortOrder = index + 1;
-
-            nextSortOrder = insertIndex;
+            nextSortOrder = insertIndex < photos.Count
+                ? photos[insertIndex].SortOrder : (photos.LastOrDefault()?.SortOrder ?? -1) + 1;
+            foreach (var item in photos.Skip(insertIndex).Reverse())
+            {
+                item.SortOrder++;
+                await _db.SaveChangesAsync();
+            }
         }
         else
         {
@@ -1245,6 +1249,7 @@ public class GalleriesController : ControllerBase
         _db.Photos.Add(photo);
         await _db.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         var imageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
         {
             BucketName = _s3Options.BucketName,
