@@ -131,6 +131,35 @@ public sealed class MoodboardLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task Details_KeepLink_WhenChangingType_AndRejectDuplicateMoodboardConversion()
+    {
+        var controller = Controller(_owner.Id);
+        var gallery = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(GalleryPurpose.Moodboard, _post.Id))).Value);
+        Assert.IsType<OkObjectResult>(await controller.Update(gallery.Id, new()
+        {
+            Title = "Portfolio", Description = "Updated", Purpose = GalleryPurpose.Portfolio
+        }));
+        Assert.Equal(_post.Id, (await _db.Galleries.FindAsync(gallery.Id))!.CollabPostId);
+        Assert.IsType<CreatedResult>(await controller.Create(Request(GalleryPurpose.Moodboard, _post.Id)));
+        Assert.IsType<OkObjectResult>(await controller.Update(gallery.Id, new()
+        {
+            Title = "Still portfolio", Purpose = GalleryPurpose.Portfolio
+        }));
+        Assert.IsType<ConflictObjectResult>(await controller.Update(gallery.Id, new()
+        {
+            Title = "Blocked conversion", Purpose = GalleryPurpose.Moodboard
+        }));
+        Assert.Equal(GalleryPurpose.Portfolio, (await _db.Galleries.FindAsync(gallery.Id))!.Purpose);
+        Assert.IsType<OkObjectResult>(await controller.UpdateCollaboration(gallery.Id, new()));
+        Assert.IsType<OkObjectResult>(await controller.Update(gallery.Id, new()
+        {
+            Title = "Unlinked moodboard", Purpose = GalleryPurpose.Moodboard
+        }));
+        Assert.Null((await _db.Galleries.FindAsync(gallery.Id))!.CollabPostId);
+    }
+
+    [Fact]
     public async Task Database_RejectsDuplicateMoodboards_WhenValidationIsBypassed()
     {
         _db.Galleries.Add(new Gallery { OwnerId = _owner.Id, CollabPostId = _post.Id, Purpose = GalleryPurpose.Moodboard });
