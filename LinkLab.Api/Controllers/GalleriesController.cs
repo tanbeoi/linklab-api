@@ -445,6 +445,46 @@ public class GalleriesController : ControllerBase
         });
     }
 
+    // Permanently remove a gallery the current user owns, including the gallery's
+    // photos and a separately uploaded thumbnail from S3. Photo records cascade
+    // from the gallery in the database.
+    [Authorize]
+    [HttpDelete("{galleryId:guid}")]
+    public async Task<IActionResult> Delete(Guid galleryId)
+    {
+        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdText, out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+
+        var gallery = await _db.Galleries
+            .Include(candidate => candidate.Photos)
+            .FirstOrDefaultAsync(candidate => candidate.Id == galleryId && candidate.OwnerId == userId);
+
+        if (gallery is null)
+            return NotFound(new { error = "Gallery not found." });
+
+        var objectKeys = gallery.Photos
+            .Where(photo => photo.YoutubeVideoId == null)
+            .Select(photo => photo.ObjectKey)
+            .Append(gallery.ThumbnailObjectKey)
+            .Where(objectKey => !string.IsNullOrWhiteSpace(objectKey))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var objectKey in objectKeys)
+        {
+            await _s3.DeleteObjectAsync(new DeleteObjectRequest
+            {
+                BucketName = _s3Options.BucketName,
+                Key = objectKey
+            }, HttpContext.RequestAborted);
+        }
+
+        _db.Galleries.Remove(gallery);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     // List all public galleries (public)
     [HttpGet]
     [ProducesResponseType(
