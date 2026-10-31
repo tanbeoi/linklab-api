@@ -395,6 +395,7 @@ public class GalleriesController : ControllerBase
         if (!Guid.TryParse(userIdText, out var userId))
             return Unauthorized(new { error = "Invalid token user." });
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var gallery = await _db.Galleries
             .FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
 
@@ -416,7 +417,15 @@ public class GalleriesController : ControllerBase
         if (!Enum.IsDefined(req.Purpose))
             return BadRequest(new { error = "Invalid gallery purpose." });
 
-        if (gallery.CollabPostId.HasValue)
+        if (req.Purpose == GalleryPurpose.Moodboard &&
+            await _db.Photos.AnyAsync(p => p.GalleryId == galleryId && p.YoutubeVideoId != null))
+            return BadRequest(new { error = "Moodboard currently only supports photos." });
+
+        // Details never change the collaboration link. Only a conversion into
+        // a moodboard needs link validation to preserve one moodboard per post.
+        if (gallery.CollabPostId.HasValue &&
+            gallery.Purpose != req.Purpose &&
+            req.Purpose == GalleryPurpose.Moodboard)
         {
             var linkError = await ValidateCollabPostLinkAsync(
                 userId,
@@ -436,6 +445,7 @@ public class GalleriesController : ControllerBase
         if (saveError is not null)
             return saveError;
 
+        await transaction.CommitAsync();
         return Ok(new
         {
             gallery.Id,
@@ -811,15 +821,66 @@ public class GalleriesController : ControllerBase
             photo.Gallery.ThumbnailZoom = 1;
         }
 
-        await _s3.DeleteObjectAsync(new DeleteObjectRequest
-        {
-            BucketName = _s3Options.BucketName,
-            Key = photo.ObjectKey
-        }, HttpContext.RequestAborted);
+        if (photo.YoutubeVideoId is null)
+            await _s3.DeleteObjectAsync(new DeleteObjectRequest
+            {
+                BucketName = _s3Options.BucketName,
+                Key = photo.ObjectKey
+            }, HttpContext.RequestAborted);
 
         _db.Photos.Remove(photo);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("{galleryId:guid}/videos")]
+    public async Task<IActionResult> AddYoutubeVideo(Guid galleryId, AddYoutubeVideoRequest req)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+        // Serialize against type changes and other inserts for this gallery.
+        await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var gallery = await _db.Galleries.FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
+        if (gallery is null) return NotFound(new { error = "Gallery not found." });
+        if (gallery.Purpose != GalleryPurpose.Portfolio)
+            return BadRequest(new { error = "Moodboard currently only supports photos." });
+        if (!YoutubeEmbed.TryParse(req.EmbedCode, out var videoId, out var aspectRatio))
+            return BadRequest(new { error = "Paste valid YouTube iframe embed code (Share → Embed)." });
+        if (req.InsertAtStart && req.InsertAfterPhotoId.HasValue)
+            return BadRequest(new { error = "Choose one insertion position." });
+        var items = await _db.Photos.Where(p => p.GalleryId == galleryId)
+            .OrderBy(p => p.SortOrder).ThenBy(p => p.Id).ToListAsync();
+        var index = items.Count;
+        if (req.InsertAtStart) index = 0;
+        else if (req.InsertAfterPhotoId.HasValue)
+        {
+            index = items.FindIndex(p => p.Id == req.InsertAfterPhotoId.Value);
+            if (index < 0) return BadRequest(new { error = "The insertion item does not belong to this gallery." });
+            index++;
+        }
+        var sortOrder = index < items.Count ? items[index].SortOrder : (items.LastOrDefault()?.SortOrder ?? -1) + 1;
+        // Save from the end to avoid the unique gallery/sort-order index.
+        foreach (var item in items.Skip(index).Reverse())
+        {
+            item.SortOrder++;
+            await _db.SaveChangesAsync();
+        }
+        var id = Guid.NewGuid();
+        var video = new Photo
+        {
+            Id = id, GalleryId = galleryId, ObjectKey = $"youtube/{id}",
+            YoutubeVideoId = videoId, VideoAspectRatio = aspectRatio, SortOrder = sortOrder
+        };
+        _db.Photos.Add(video);
+        await _db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return Ok(new PhotoResponse
+        {
+            Id = video.Id, GalleryId = galleryId, ObjectKey = video.ObjectKey,
+            YoutubeVideoId = videoId, VideoAspectRatio = aspectRatio,
+            SortOrder = video.SortOrder, CreatedAtUtc = video.CreatedAtUtc
+        });
     }
 
     // [x] Create photo upload URL (auth required)
