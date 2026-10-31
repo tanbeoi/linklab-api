@@ -215,6 +215,43 @@ public sealed class MoodboardLinkTests : IDisposable
             gallery.Id, new() { EmbedCode = Embed }));
     }
 
+    [Theory]
+    [InlineData(GalleryPurpose.Portfolio)]
+    [InlineData(GalleryPurpose.Moodboard)]
+    public async Task Publish_RejectsEmptyGallery(GalleryPurpose purpose)
+    {
+        var controller = Controller(_owner.Id);
+        var gallery = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(purpose, null))).Value);
+        var result = Assert.IsType<BadRequestObjectResult>(await controller.Publish(gallery.Id));
+        var error = System.Text.Json.JsonSerializer.SerializeToElement(result.Value).GetProperty("error").GetString();
+        Assert.Equal(purpose == GalleryPurpose.Moodboard
+            ? "Add at least one photo before publishing."
+            : "Add at least one photo or embedded YouTube video before publishing.", error);
+        Assert.False((await _db.Galleries.FindAsync(gallery.Id))!.IsPublished);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Publish_AllowsPortfolioWithOnePhotoOrOneVideo(bool videoOnly)
+    {
+        var controller = Controller(_owner.Id);
+        var gallery = Assert.IsType<GalleryResponse>(Assert.IsType<CreatedResult>(
+            await controller.Create(Request(GalleryPurpose.Portfolio, null))).Value);
+        if (videoOnly)
+            Assert.IsType<OkObjectResult>(await controller.AddYoutubeVideo(gallery.Id, new() { EmbedCode = Embed }));
+        else
+        {
+            _db.Photos.Add(new Photo { Id = Guid.NewGuid(), GalleryId = gallery.Id, ObjectKey = "image" });
+            await _db.SaveChangesAsync();
+        }
+        Assert.IsType<OkObjectResult>(await controller.Publish(gallery.Id));
+        var saved = (await _db.Galleries.FindAsync(gallery.Id))!;
+        Assert.True(saved.IsPublished);
+        Assert.NotNull(saved.PublishedAtUtc);
+    }
+
     [Fact]
     public async Task Database_RejectsDuplicateMoodboards_WhenValidationIsBypassed()
     {
