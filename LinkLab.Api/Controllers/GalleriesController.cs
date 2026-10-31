@@ -644,7 +644,9 @@ public class GalleriesController : ControllerBase
             Id = p.Id,
             GalleryId = p.GalleryId,
             ObjectKey = p.ObjectKey,
-            ImageUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            YoutubeVideoId = p.YoutubeVideoId,
+            VideoAspectRatio = p.VideoAspectRatio,
+            ImageUrl = p.YoutubeVideoId != null ? string.Empty : _s3.GetPreSignedURL(new GetPreSignedUrlRequest
             {
                 BucketName = _s3Options.BucketName,
                 Key = p.ObjectKey,
