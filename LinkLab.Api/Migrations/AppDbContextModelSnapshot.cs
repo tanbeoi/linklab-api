@@ -216,6 +216,12 @@ namespace LinkLab.Api.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
+                    b.Property<double?>("VideoAspectRatio")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("YoutubeVideoId")
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ObjectKey")
