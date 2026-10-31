@@ -6,6 +6,8 @@ public class Photo
     public Guid GalleryId { get; set; }
     public Gallery Gallery { get; set; } = null!;
     public string ObjectKey { get; set; } = string.Empty;
+    public string? YoutubeVideoId { get; set; }
+    public double? VideoAspectRatio { get; set; }
     public string? Caption { get; set; }
     public int SortOrder { get; set; }
     // Null means the moodboard photo is still in the owner's Unsorted tray.
