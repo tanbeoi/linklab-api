@@ -15,7 +15,7 @@ public record CollabPostResponse(
     IReadOnlyList<string> MoodboardPreviewImageUrls,
     int MoodboardPhotoCount,
 
-    // Published portfolio work made through this post.
+    // Published portfolio work and the current gallery owner's linked drafts.
     IReadOnlyList<PortfolioGalleryPreview> PortfolioGalleries,
 
     // True only when the authenticated viewer has already applied.
@@ -28,5 +28,8 @@ public record CollabPostResponse(
     // A post owner needs to know whether a moodboard is already linked even
     // before it is published or has photos. Public viewers only receive this
     // for published moodboards.
-    bool HasLinkedMoodboard = false
+    bool HasLinkedMoodboard = false,
+
+    // Null when no moodboard is visible to this viewer.
+    bool? MoodboardIsPublished = null
 );

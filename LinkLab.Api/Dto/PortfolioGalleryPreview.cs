@@ -9,5 +9,6 @@ public record PortfolioGalleryPreview(
     int PhotoCount,
     double ThumbnailFocalPointX,
     double ThumbnailFocalPointY,
-    double ThumbnailZoom
+    double ThumbnailZoom,
+    bool IsPublished = true
 );
