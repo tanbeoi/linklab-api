@@ -48,10 +48,8 @@ public PostsController(
 
         var postIds = posts.Select(p => p.Id).ToList();
         var currentUserId = GetCurrentUserId();
-        // A post owner can see a collaborator's linked draft portfolio in their
-        // private editor. Linking it to the post is the collaborator's explicit
-        // decision to share that work with the post owner; public visitors still
-        // receive published work only.
+        // Post ownership only affects the private linked-moodboard signal;
+        // gallery previews on posts must always contain published work only.
         var postIdsOwnedByCurrentUser = currentUserId.HasValue
             ? posts.Where(post => post.UserId == currentUserId.Value).Select(post => post.Id).ToList()
             : new List<Guid>();
@@ -100,7 +98,7 @@ public PostsController(
                 g.CollabPostId.HasValue &&
                 postIds.Contains(g.CollabPostId.Value) &&
                 g.Purpose == GalleryPurpose.Portfolio &&
-                (g.IsPublished || postIdsOwnedByCurrentUser.Contains(g.CollabPostId.Value)))
+                g.IsPublished)
             .OrderByDescending(g => g.PublishedAtUtc)
             .ThenByDescending(g => g.CreatedAtUtc)
             .Select(g => new
