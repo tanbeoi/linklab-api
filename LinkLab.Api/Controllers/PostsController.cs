@@ -48,8 +48,8 @@ public PostsController(
 
         var postIds = posts.Select(p => p.Id).ToList();
         var currentUserId = GetCurrentUserId();
-        // Post ownership only affects the private linked-moodboard signal;
-        // gallery previews on posts must always contain published work only.
+        // Owners may preview their own linked drafts. Other viewers only
+        // receive published gallery content.
         var postIdsOwnedByCurrentUser = currentUserId.HasValue
             ? posts.Where(post => post.UserId == currentUserId.Value).Select(post => post.Id).ToList()
             : new List<Guid>();
@@ -63,10 +63,11 @@ public PostsController(
                 g.CollabPostId.HasValue &&
                 postIds.Contains(g.CollabPostId.Value) &&
                 g.Purpose == GalleryPurpose.Moodboard &&
-                g.IsPublished)
+                (g.IsPublished || (currentUserId.HasValue && g.OwnerId == currentUserId.Value)))
             .Select(g => new
             {
                 PostId = g.CollabPostId!.Value,
+                g.IsPublished,
                 PhotoCount = g.Photos.Count,
                 ObjectKeys = g.Photos
                     .OrderBy(p => p.SortOrder)
@@ -98,7 +99,7 @@ public PostsController(
                 g.CollabPostId.HasValue &&
                 postIds.Contains(g.CollabPostId.Value) &&
                 g.Purpose == GalleryPurpose.Portfolio &&
-                g.IsPublished)
+                (g.IsPublished || (currentUserId.HasValue && g.OwnerId == currentUserId.Value)))
             .OrderByDescending(g => g.PublishedAtUtc)
             .ThenByDescending(g => g.CreatedAtUtc)
             .Select(g => new
@@ -107,6 +108,7 @@ public PostsController(
                 g.Id,
                 g.Title,
                 g.OwnerId,
+                g.IsPublished,
                 OwnerDisplayName = g.Owner.DisplayName,
                 PhotoCount = g.Photos.Count,
                 g.ThumbnailFocalPointX,
@@ -165,7 +167,8 @@ public PostsController(
                     portfolio.PhotoCount,
                     portfolio.ThumbnailFocalPointX,
                     portfolio.ThumbnailFocalPointY,
-                    portfolio.ThumbnailZoom
+                    portfolio.ThumbnailZoom,
+                    portfolio.IsPublished
                 )).ToList()
                 : new List<PortfolioGalleryPreview>();
             
@@ -173,6 +176,7 @@ public PostsController(
             {
                 MoodboardPreviewImageUrls = imageUrls,
                 MoodboardPhotoCount = moodboard?.PhotoCount ?? 0,
+                MoodboardIsPublished = moodboard?.IsPublished,
                 PortfolioGalleries = portfolioGalleries,
                 HasLinkedMoodboard = linkedMoodboardPostIds.Contains(post.Id)
             };
@@ -449,9 +453,11 @@ public PostsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMoodboard(Guid id)
     {
+        var currentUserId = GetCurrentUserId();
         var gallery = await _db.Galleries.AsNoTracking()
             .Where(g => g.CollabPostId == id &&
-                g.Purpose == GalleryPurpose.Moodboard && g.IsPublished)
+                g.Purpose == GalleryPurpose.Moodboard &&
+                (g.IsPublished || (currentUserId.HasValue && g.OwnerId == currentUserId.Value)))
             .Select(g => new GalleryResponse
             {
                 Id = g.Id,
@@ -471,7 +477,7 @@ public PostsController(
             .FirstOrDefaultAsync();
 
         if (gallery is null)
-            return NotFound(new { error = "No published moodboard found for this post." });
+            return NotFound(new { error = "No visible moodboard found for this post." });
 
         return Ok(gallery);
     }
