@@ -18,7 +18,7 @@ public sealed class PostsPortfolioVisibilityTests
     [InlineData("gallery-owner")]
     [InlineData("visitor")]
     [InlineData("anonymous")]
-    public async Task PostPreviews_OnlyIncludePublishedPortfolios_ForEveryViewer(string viewer)
+    public async Task PostPreviews_IncludeDraftsOnlyForTheirGalleryOwner(string viewer)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -55,18 +55,40 @@ public sealed class PostsPortfolioVisibilityTests
         async Task AssertOnlyPublished()
         {
             var detail = Assert.IsType<CollabPostResponse>(Assert.IsType<OkObjectResult>(await controller.GetById(post.Id)).Value);
-            Assert.Equal(published.Id, Assert.Single(detail.PortfolioGalleries).Id);
+            Assert.Contains(detail.PortfolioGalleries, gallery => gallery.Id == published.Id && gallery.IsPublished);
+            Assert.Equal(viewer == "gallery-owner", detail.PortfolioGalleries.Any(gallery => gallery.Id == draft.Id && !gallery.IsPublished));
+            Assert.Equal(viewer == "gallery-owner" ? 2 : 1, detail.PortfolioGalleries.Count);
             var feed = Assert.IsType<PagedResponse<CollabPostResponse>>(Assert.IsType<OkObjectResult>(await controller.List()).Value);
-            Assert.Equal(published.Id, Assert.Single(Assert.Single(feed.Items).PortfolioGalleries).Id);
+            var previews = Assert.Single(feed.Items).PortfolioGalleries;
+            Assert.Equal(viewer == "gallery-owner" ? 2 : 1, previews.Count);
+            Assert.Equal(viewer == "gallery-owner", previews.Any(gallery => gallery.Id == draft.Id && !gallery.IsPublished));
         }
 
         await AssertOnlyPublished();
+        var moodboard = new Gallery
+        {
+            Owner = galleryOwner, CollabPost = post, Purpose = GalleryPurpose.Moodboard,
+            Title = "Draft moodboard"
+        };
+        db.Add(moodboard);
+        await db.SaveChangesAsync();
+        var withMoodboard = Assert.IsType<CollabPostResponse>(Assert.IsType<OkObjectResult>(await controller.GetById(post.Id)).Value);
+        Assert.Equal(viewer == "gallery-owner" ? false : (bool?)null, withMoodboard.MoodboardIsPublished);
+        var moodboardResult = await controller.GetMoodboard(post.Id);
+        if (viewer == "gallery-owner") Assert.IsType<OkObjectResult>(moodboardResult);
+        else Assert.IsType<NotFoundObjectResult>(moodboardResult);
+        moodboard.IsPublished = true;
+        await db.SaveChangesAsync();
+        Assert.IsType<OkObjectResult>(await controller.GetMoodboard(post.Id));
+        var publishedMoodboard = Assert.IsType<CollabPostResponse>(Assert.IsType<OkObjectResult>(await controller.GetById(post.Id)).Value);
+        Assert.Equal(true, publishedMoodboard.MoodboardIsPublished);
         published.IsPublished = false;
         published.PublishedAtUtc = null;
         await db.SaveChangesAsync();
         var afterUnpublish = Assert.IsType<CollabPostResponse>(Assert.IsType<OkObjectResult>(await controller.GetById(post.Id)).Value);
-        Assert.Empty(afterUnpublish.PortfolioGalleries);
+        Assert.Equal(viewer == "gallery-owner" ? 2 : 0, afterUnpublish.PortfolioGalleries.Count);
+        Assert.All(afterUnpublish.PortfolioGalleries, gallery => Assert.False(gallery.IsPublished));
         var feedAfterUnpublish = Assert.IsType<PagedResponse<CollabPostResponse>>(Assert.IsType<OkObjectResult>(await controller.List()).Value);
-        Assert.Empty(Assert.Single(feedAfterUnpublish.Items).PortfolioGalleries);
+        Assert.Equal(viewer == "gallery-owner" ? 2 : 0, Assert.Single(feedAfterUnpublish.Items).PortfolioGalleries.Count);
     }
 }
