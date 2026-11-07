@@ -467,7 +467,7 @@ public class GalleriesController : ControllerBase
         if (!Guid.TryParse(userIdText, out var userId))
             return Unauthorized(new { error = "Invalid token user." });
 
-        var gallery = await _db.Galleries
+        var gallery = await _db.Galleries.IgnoreQueryFilters()
             .Include(candidate => candidate.Photos)
             .FirstOrDefaultAsync(candidate => candidate.Id == galleryId && candidate.OwnerId == userId);
 
@@ -796,44 +796,115 @@ public class GalleriesController : ControllerBase
         return NoContent();
     }
 
-    // Permanently remove a photo the current user owns. This also removes the
-    // original object from S3 so deleted moodboard cards do not leave orphaned files.
+    private sealed record DeletedThumbnailSnapshot(double X, double Y, double Zoom);
+
+    private PhotoResponse PhotoResult(Photo photo) => new()
+    {
+        Id = photo.Id, GalleryId = photo.GalleryId, ObjectKey = photo.ObjectKey,
+        ImageUrl = photo.YoutubeVideoId is null ? CreateReadUrl(photo.ObjectKey, DateTime.UtcNow.AddMinutes(30)) : string.Empty,
+        YoutubeVideoId = photo.YoutubeVideoId, VideoAspectRatio = photo.VideoAspectRatio,
+        Caption = photo.Caption, SortOrder = photo.SortOrder,
+        BoardX = photo.BoardX, BoardY = photo.BoardY, BoardWidth = photo.BoardWidth,
+        CaptionHeight = photo.CaptionHeight, BoardZIndex = photo.BoardZIndex, CreatedAtUtc = photo.CreatedAtUtc
+    };
+
+    // Retain the record and S3 file for Undo, but exclude it from all normal
+    // queries via Photo's query filter. Permanent gallery deletion removes both.
     [Authorize]
     [HttpDelete("{galleryId:guid}/photos/{photoId:guid}")]
     public async Task<IActionResult> DeletePhoto(Guid galleryId, Guid photoId)
     {
-        var userIdText = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdText, out var userId))
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
             return Unauthorized(new { error = "Invalid token user." });
-
-        var photo = await _db.Photos
-            .Include(candidate => candidate.Gallery)
-            .FirstOrDefaultAsync(candidate =>
-                candidate.Id == photoId &&
-                candidate.GalleryId == galleryId &&
-                candidate.Gallery.OwnerId == userId);
-
-        if (photo is null)
-            return NotFound(new { error = "Photo not found." });
-
+        var photo = await _db.Photos.IgnoreQueryFilters().Include(p => p.Gallery)
+            .FirstOrDefaultAsync(p => p.Id == photoId && p.GalleryId == galleryId && p.Gallery.OwnerId == userId);
+        if (photo is null) return NotFound(new { error = "Photo not found." });
+        if (photo.DeletedAtUtc.HasValue) return NoContent();
         if (photo.Gallery.ThumbnailPhotoId == photo.Id)
         {
+            photo.DeletedThumbnailSettings = System.Text.Json.JsonSerializer.Serialize(new DeletedThumbnailSnapshot(
+                photo.Gallery.ThumbnailFocalPointX, photo.Gallery.ThumbnailFocalPointY, photo.Gallery.ThumbnailZoom));
             photo.Gallery.ThumbnailPhotoId = null;
             photo.Gallery.ThumbnailFocalPointX = 50;
             photo.Gallery.ThumbnailFocalPointY = 50;
             photo.Gallery.ThumbnailZoom = 1;
         }
-
-        if (photo.YoutubeVideoId is null)
-            await _s3.DeleteObjectAsync(new DeleteObjectRequest
-            {
-                BucketName = _s3Options.BucketName,
-                Key = photo.ObjectKey
-            }, HttpContext.RequestAborted);
-
-        _db.Photos.Remove(photo);
+        photo.DeletedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [Authorize]
+    [HttpPost("{galleryId:guid}/photos/{photoId:guid}/restore")]
+    public async Task<IActionResult> RestorePhoto(Guid galleryId, Guid photoId)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+        await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var photo = await _db.Photos.IgnoreQueryFilters().Include(p => p.Gallery)
+            .FirstOrDefaultAsync(p => p.Id == photoId && p.GalleryId == galleryId && p.Gallery.OwnerId == userId);
+        if (photo is null) return NotFound(new { error = "Photo not found." });
+        if (photo.YoutubeVideoId != null && photo.Gallery.Purpose == GalleryPurpose.Moodboard)
+            return BadRequest(new { error = "Moodboard currently only supports photos." });
+        if (photo.DeletedAtUtc.HasValue)
+        {
+            var later = await _db.Photos.Where(p => p.GalleryId == galleryId && p.SortOrder >= photo.SortOrder)
+                .OrderByDescending(p => p.SortOrder).ToListAsync();
+            foreach (var item in later)
+            {
+                item.SortOrder++;
+                await _db.SaveChangesAsync();
+            }
+            photo.DeletedAtUtc = null;
+            if (photo.DeletedThumbnailSettings != null && photo.Gallery.ThumbnailPhotoId == null && photo.Gallery.ThumbnailObjectKey == null)
+            {
+                var frame = System.Text.Json.JsonSerializer.Deserialize<DeletedThumbnailSnapshot>(photo.DeletedThumbnailSettings)!;
+                photo.Gallery.ThumbnailPhotoId = photo.Id;
+                photo.Gallery.ThumbnailFocalPointX = frame.X;
+                photo.Gallery.ThumbnailFocalPointY = frame.Y;
+                photo.Gallery.ThumbnailZoom = frame.Zoom;
+            }
+            photo.DeletedThumbnailSettings = null;
+            await _db.SaveChangesAsync();
+        }
+        var index = await _db.Photos.CountAsync(p => p.GalleryId == galleryId && p.SortOrder < photo.SortOrder);
+        await transaction.CommitAsync();
+        return Ok(new { photo = PhotoResult(photo), index, thumbnail = await CreateThumbnailResponseAsync(photo.Gallery) });
+    }
+
+    [Authorize]
+    [HttpPatch("{galleryId:guid}/photos/board-layouts")]
+    public async Task<IActionResult> UpdatePhotoLayouts(Guid galleryId, UpdatePhotoLayoutsRequest req)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            return Unauthorized(new { error = "Invalid token user." });
+        if (req.Photos is null || req.Photos.Count is < 1 or > 500 || req.Photos.Select(p => p.PhotoId).Distinct().Count() != req.Photos.Count)
+            return BadRequest(new { error = "Choose between 1 and 500 distinct photos." });
+        var gallery = await _db.Galleries.FirstOrDefaultAsync(g => g.Id == galleryId && g.OwnerId == userId);
+        if (gallery is null) return NotFound(new { error = "Gallery not found." });
+        if (gallery.Purpose != GalleryPurpose.Moodboard)
+            return BadRequest(new { error = "Only moodboard photos can be positioned on a board." });
+        foreach (var layout in req.Photos)
+        {
+            if (layout.BoardX.HasValue != layout.BoardY.HasValue ||
+                (layout.BoardX.HasValue && (!double.IsFinite(layout.BoardX.Value) || layout.BoardX < 0 || layout.BoardX > MoodboardCanvasWidth)) ||
+                (layout.BoardY.HasValue && (!double.IsFinite(layout.BoardY.Value) || layout.BoardY < 0 || layout.BoardY > MoodboardCanvasHeight)) ||
+                (layout.BoardWidth.HasValue && (!double.IsFinite(layout.BoardWidth.Value) || layout.BoardWidth < 120 || layout.BoardWidth > MoodboardCanvasWidth)) ||
+                (layout.CaptionHeight.HasValue && (!double.IsFinite(layout.CaptionHeight.Value) || layout.CaptionHeight < 40 || layout.CaptionHeight > 320)) ||
+                layout.BoardZIndex < 0)
+                return BadRequest(new { error = "Invalid moodboard layout." });
+        }
+        var ids = req.Photos.Select(p => p.PhotoId).ToList();
+        var photos = await _db.Photos.Where(p => p.GalleryId == galleryId && ids.Contains(p.Id)).ToDictionaryAsync(p => p.Id);
+        if (photos.Count != ids.Count) return NotFound(new { error = "One or more photos were not found." });
+        foreach (var layout in req.Photos)
+        {
+            var photo = photos[layout.PhotoId];
+            photo.BoardX = layout.BoardX; photo.BoardY = layout.BoardY;
+            photo.BoardWidth = layout.BoardWidth; photo.CaptionHeight = layout.CaptionHeight; photo.BoardZIndex = layout.BoardZIndex;
+        }
+        await _db.SaveChangesAsync();
+        return Ok(req.Photos.Select(layout => PhotoResult(photos[layout.PhotoId])).ToList());
     }
 
     [Authorize]
@@ -1161,7 +1232,7 @@ public class GalleriesController : ControllerBase
         }
 
         // Check if the object key exists in SQL database (to prevent duplicates)
-        var photoAlreadyExists = await _db.Photos
+        var photoAlreadyExists = await _db.Photos.IgnoreQueryFilters()
             .AsNoTracking()
             .AnyAsync(p => p.ObjectKey == objectKey);
 
