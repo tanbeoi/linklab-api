@@ -131,6 +131,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Photo>(entity =>
         {
             entity.HasKey(p => p.Id);
+            entity.HasQueryFilter(p => p.DeletedAtUtc == null);
 
             entity.Property(p => p.ObjectKey)
                 .IsRequired()
@@ -169,7 +170,8 @@ public class AppDbContext : DbContext
 
             // Each photos in a gallery must have an unique SortOrder
             entity.HasIndex(p => new { p.GalleryId, p.SortOrder })
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("\"DeletedAtUtc\" IS NULL");
         });
     }
 

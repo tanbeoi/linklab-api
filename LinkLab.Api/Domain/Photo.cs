@@ -8,6 +8,8 @@ public class Photo
     public string ObjectKey { get; set; } = string.Empty;
     public string? YoutubeVideoId { get; set; }
     public double? VideoAspectRatio { get; set; }
+    public DateTime? DeletedAtUtc { get; set; }
+    public string? DeletedThumbnailSettings { get; set; }
     public string? Caption { get; set; }
     public int SortOrder { get; set; }
     // Null means the moodboard photo is still in the owner's Unsorted tray.
