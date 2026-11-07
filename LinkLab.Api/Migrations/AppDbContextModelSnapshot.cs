@@ -205,6 +205,12 @@ namespace LinkLab.Api.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeletedThumbnailSettings")
+                        .HasColumnType("text");
+
                     b.Property<Guid>("GalleryId")
                         .HasColumnType("uuid");
 
@@ -228,7 +234,8 @@ namespace LinkLab.Api.Migrations
                         .IsUnique();
 
                     b.HasIndex("GalleryId", "SortOrder")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"DeletedAtUtc\" IS NULL");
 
                     b.ToTable("Photos");
                 });
